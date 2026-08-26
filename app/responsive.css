@@ -1,0 +1,19 @@
+@media(max-width:800px){
+  .nav a{display:none}
+  .stat-grid{grid-template-columns:1fr 1fr}
+  .progress-grid{grid-template-columns:1fr}
+  .history-table{overflow:auto}
+  .history-row{min-width:680px}
+  .progress-head{align-items:flex-start}
+  .progress-head h1{font-size:32px}
+}
+@media(max-width:520px){
+  .nav{gap:1px}
+  .nav button{padding:8px 7px}
+  .modes{grid-template-columns:1fr}
+  .stat-grid{grid-template-columns:1fr 1fr}
+  .progress-page{padding:35px 14px 70px}
+  .progress-head>.primary{display:none}
+  .chart{gap:5px}
+  .bar-wrap>small{font-size:6px}
+}
