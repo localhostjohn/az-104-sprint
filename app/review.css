@@ -1,0 +1,18 @@
+.modes button:last-child {
+  grid-column: 1 / -1;
+}
+
+.modes button:disabled,
+.primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.mistake-note {
+  border-color: #f0d4a7;
+  background: linear-gradient(135deg, #fffaf1, #fff4df);
+}
+
+.mistake-note span {
+  color: #b56b13;
+}
