@@ -6,6 +6,7 @@ export type QuestionMistake = {
   miss_count:number;
   last_missed_at:string;
 };
+export type QuestionAnswerResult = {question_id:number;correct:boolean};
 
 const database = () => (env as unknown as {DB:D1Database}).DB;
 
@@ -27,19 +28,22 @@ export async function listActiveMistakes(){
   return result.results;
 }
 
-export async function recordQuestionAnswer(questionId:number,correct:boolean){
+export async function recordQuestionAnswers(inputs:QuestionAnswerResult[]){
   const db=await ensureMistakesTable();
-  if(correct){
-    await db.prepare('UPDATE question_mistakes SET active = 0 WHERE question_id = ?').bind(questionId).run();
-  }else{
-    await db.prepare(`
+  const statements=inputs.map(input=>input.correct
+    ?db.prepare('UPDATE question_mistakes SET active = 0 WHERE question_id = ?').bind(input.question_id)
+    :db.prepare(`
       INSERT INTO question_mistakes (question_id, miss_count, active, last_missed_at)
       VALUES (?, 1, 1, CURRENT_TIMESTAMP)
       ON CONFLICT(question_id) DO UPDATE SET
         miss_count = question_mistakes.miss_count + 1,
         active = 1,
         last_missed_at = CURRENT_TIMESTAMP
-    `).bind(questionId).run();
-  }
+    `).bind(input.question_id));
+  if(statements.length)await db.batch(statements);
   return listActiveMistakes();
+}
+
+export async function recordQuestionAnswer(questionId:number,correct:boolean){
+  return recordQuestionAnswers([{question_id:questionId,correct}]);
 }

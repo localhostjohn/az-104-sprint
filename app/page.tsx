@@ -1,8 +1,8 @@
 'use client';
-import {useEffect,useMemo,useState} from 'react';
+import {useEffect,useMemo,useRef,useState} from 'react';
 import {domains,Question,questions} from './questions';
 
-type Screen='home'|'quiz'|'result'|'progress';
+type Screen='home'|'quiz'|'examReview'|'result'|'progress';
 type Mode='sprint'|'mock'|'review';
 type Answer={q:Question;pick:number;ok:boolean};
 type Attempt={id:number;score:number;correct_answers:number;total_questions:number;elapsed_seconds:number;mode:'sprint'|'mock';domain:string;created_at:string};
@@ -10,13 +10,19 @@ const shuffle=<T,>(items:T[])=>[...items].sort(()=>Math.random()-.5);
 const fmtTime=(value:number)=>Math.floor(value/60)+':'+String(value%60).padStart(2,'0');
 const dateValue=(value:string)=>value.includes('T')?value:value.replace(' ','T')+'Z';
 const fmtDate=(value:string)=>new Date(dateValue(value)).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
-const createMockRound=()=>shuffle([
-  ...shuffle(questions.filter(q=>q.domain==='Identity & governance')).slice(0,12),
-  ...shuffle(questions.filter(q=>q.domain==='Compute')).slice(0,12),
-  ...shuffle(questions.filter(q=>q.domain==='Storage')).slice(0,9),
-  ...shuffle(questions.filter(q=>q.domain==='Networking')).slice(0,10),
-  ...shuffle(questions.filter(q=>q.domain==='Monitoring & recovery')).slice(0,7),
-]);
+const createMockRound=()=>{
+  const core=questions.filter(q=>!q.caseStudy);
+  const standard=shuffle([
+    ...shuffle(core.filter(q=>q.domain==='Identity & governance')).slice(0,10),
+    ...shuffle(core.filter(q=>q.domain==='Compute')).slice(0,10),
+    ...shuffle(core.filter(q=>q.domain==='Storage')).slice(0,8),
+    ...shuffle(core.filter(q=>q.domain==='Networking')).slice(0,9),
+    ...shuffle(core.filter(q=>q.domain==='Monitoring & recovery')).slice(0,7),
+  ]);
+  const caseIds=shuffle([...new Set(questions.flatMap(q=>q.caseStudy?[q.caseStudy.id]:[]))]).slice(0,2);
+  const caseBlocks=caseIds.map(caseId=>questions.filter(q=>q.caseStudy?.id===caseId));
+  return [...standard.slice(0,15),...caseBlocks[0],...standard.slice(15,34),...caseBlocks[1],...standard.slice(34)];
+};
 const loadLocalMistakes=()=>{
   const ids=JSON.parse(localStorage.getItem('az104-mistakes')||'[]');
   return Array.isArray(ids)?ids.filter((id):id is number=>Number.isInteger(id)&&questions.some(question=>question.id===id)):[];
@@ -37,17 +43,21 @@ export default function Home(){
   const[historyStatus,setHistoryStatus]=useState<'loading'|'ready'|'local'|'error'>('loading');
   const[mistakeIds,setMistakeIds]=useState<number[]>([]);
   const[mistakeStatus,setMistakeStatus]=useState<'loading'|'ready'|'local'|'error'>('loading');
+  const[flagged,setFlagged]=useState<number[]>([]);
+  const submittedRef=useRef(false);
   const current=round[index];
 
   useEffect(()=>{fetch('/api/scores').then(r=>r.ok?r.json():Promise.reject()).then(data=>{setHistory(data.attempts||[]);setHistoryStatus('ready')}).catch(()=>{try{setHistory(JSON.parse(localStorage.getItem('az104-history')||'[]'));setHistoryStatus('local')}catch{setHistoryStatus('error')}})},[]);
   useEffect(()=>{fetch('/api/mistakes').then(r=>r.ok?r.json():Promise.reject()).then(data=>{setMistakeIds((data.mistakes||[]).map((item:{question_id:number})=>item.question_id));setMistakeStatus('ready')}).catch(()=>{try{setMistakeIds(loadLocalMistakes());setMistakeStatus('local')}catch{setMistakeStatus('error')}})},[]);
-  useEffect(()=>{if(screen!=='quiz')return;const timer=setInterval(()=>setSeconds(v=>v+1),1000);return()=>clearInterval(timer)},[screen]);
+  useEffect(()=>{if(screen!=='quiz'&&screen!=='examReview')return;const timer=setInterval(()=>setSeconds(v=>v+1),1000);return()=>clearInterval(timer)},[screen]);
 
   const best=Math.max(0,...history.map(x=>x.score));
   const average=history.length?Math.round(history.reduce((sum,x)=>sum+x.score,0)/history.length):0;
   const targetHits=history.filter(x=>x.score>=800).length;
   const right=answers.filter(x=>x.ok).length;
   const score=Math.round(right/Math.max(round.length,1)*1000);
+  const answeredIds=useMemo(()=>new Set(answers.map(answer=>answer.q.id)),[answers]);
+  const unansweredCount=Math.max(0,round.length-answers.length);
   const weak=useMemo(()=>Object.entries(answers.reduce<Record<string,{right:number;total:number}>>((acc,item)=>{acc[item.q.domain]??={right:0,total:0};acc[item.q.domain].total++;if(item.ok)acc[item.q.domain].right++;return acc},{})).sort((a,b)=>a[1].right/a[1].total-b[1].right/b[1].total)[0]?.[0],[answers]);
   const mistakeQuestions=useMemo(()=>mistakeIds.map(id=>questions.find(question=>question.id===id)).filter((question):question is Question=>Boolean(question)),[mistakeIds]);
 
@@ -55,7 +65,7 @@ export default function Home(){
     const source=questions.filter(item=>nextDomain===domains[0]||item.domain===nextDomain);
     const nextRound=nextMode==='mock'?createMockRound():nextMode==='review'?shuffle(mistakeQuestions).slice(0,10):shuffle(source).slice(0,10);
     if(!nextRound.length)return;
-    setMode(nextMode);setDomain(nextDomain);setRound(nextRound);setIndex(0);setPicked(null);setAnswers([]);setStreak(0);setSeconds(0);setScreen('quiz');
+    submittedRef.current=false;setMode(nextMode);setDomain(nextDomain);setRound(nextRound);setIndex(0);setPicked(null);setAnswers([]);setFlagged([]);setStreak(0);setSeconds(0);setScreen('quiz');
   };
   const trackMistake=(questionId:number,correct:boolean)=>{
     setMistakeIds(items=>{
@@ -65,7 +75,22 @@ export default function Home(){
     });
     if(mistakeStatus==='ready')void fetch('/api/mistakes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question_id:questionId,correct})}).then(response=>{if(!response.ok)throw new Error()}).catch(()=>{setMistakeStatus('local');setMistakeIds(items=>{try{saveLocalMistakes(items)}catch{setMistakeStatus('error')}return items})});
   };
-  const choose=(choice:number)=>{if(picked!==null)return;const ok=choice===current.answer;setPicked(choice);setAnswers(items=>[...items,{q:current,pick:choice,ok}]);setStreak(value=>ok?value+1:0);trackMistake(current.id,ok)};
+  const trackExamMistakes=(examAnswers:Answer[])=>{
+    const results=examAnswers.map(answer=>({question_id:answer.q.id,correct:answer.ok}));
+    setMistakeIds(items=>{
+      const next=results.reduce((ids,result)=>result.correct?ids.filter(id=>id!==result.question_id):[result.question_id,...ids.filter(id=>id!==result.question_id)],items);
+      if(mistakeStatus!=='ready'){try{saveLocalMistakes(next)}catch{} }
+      return next;
+    });
+    if(mistakeStatus==='ready')void fetch('/api/mistakes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({answers:results})}).then(response=>{if(!response.ok)throw new Error()}).catch(()=>{setMistakeStatus('local');setMistakeIds(items=>{try{saveLocalMistakes(items)}catch{setMistakeStatus('error')}return items})});
+  };
+  const choose=(choice:number)=>{
+    if(picked!==null&&mode!=='mock')return;
+    const nextAnswer={q:current,pick:choice,ok:choice===current.answer};
+    setPicked(choice);
+    if(mode==='mock'){setAnswers(items=>[...items.filter(answer=>answer.q.id!==current.id),nextAnswer]);return;}
+    setAnswers(items=>[...items,nextAnswer]);setStreak(value=>nextAnswer.ok?value+1:0);trackMistake(current.id,nextAnswer.ok);
+  };
   const saveAttempt=async(finalScore:number,correct:number)=>{
     const storedMode=mode==='mock'?'mock':'sprint';
     const storedDomain=mode==='mock'?'All domains':mode==='review'?'Review mistakes':domain;
@@ -73,39 +98,62 @@ export default function Home(){
     setHistory(items=>[optimistic,...items]);
     try{const response=await fetch('/api/scores',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({score:finalScore,correct_answers:correct,total_questions:round.length,elapsed_seconds:seconds,mode:storedMode,domain:storedDomain})});if(!response.ok)throw new Error();const data=await response.json();setHistory(items=>items.map(item=>item.id===optimistic.id?data.attempt:item));setHistoryStatus('ready')}catch{setHistory(items=>{try{localStorage.setItem('az104-history',JSON.stringify(items));setHistoryStatus('local')}catch{setHistoryStatus('error')}return items})}
   };
-  const next=()=>{if(index<round.length-1){setIndex(value=>value+1);setPicked(null);return}const finalRight=answers.filter(item=>item.ok).length;const finalScore=Math.round(finalRight/round.length*1000);setScreen('result');void saveAttempt(finalScore,finalRight)};
+  const goQuestion=(targetIndex:number)=>{const target=round[targetIndex];if(!target)return;setIndex(targetIndex);setPicked(answers.find(answer=>answer.q.id===target.id)?.pick??null);setScreen('quiz')};
+  const toggleFlag=()=>setFlagged(items=>items.includes(current.id)?items.filter(id=>id!==current.id):[...items,current.id]);
+  const finishExam=()=>{
+    if(submittedRef.current)return;submittedRef.current=true;
+    const finalAnswers=round.map(question=>answers.find(answer=>answer.q.id===question.id)??{q:question,pick:-1,ok:false});
+    const finalRight=finalAnswers.filter(answer=>answer.ok).length;
+    setAnswers(finalAnswers);trackExamMistakes(finalAnswers);setScreen('result');void saveAttempt(Math.round(finalRight/round.length*1000),finalRight);
+  };
+  const next=()=>{
+    if(mode==='mock'){if(index<round.length-1){goQuestion(index+1)}else{setScreen('examReview')}return;}
+    if(index<round.length-1){setIndex(value=>value+1);setPicked(null);return}
+    const finalRight=answers.filter(item=>item.ok).length;const finalScore=Math.round(finalRight/round.length*1000);setScreen('result');void saveAttempt(finalScore,finalRight);
+  };
   const goHome=()=>{if(mode==='review'&&!mistakeIds.length)setMode('sprint');setScreen('home')};
+
+  useEffect(()=>{if(mode==='mock'&&(screen==='quiz'||screen==='examReview')&&seconds>=6000)finishExam()},[mode,screen,seconds]);
 
   return <main>
     <header className="top"><button className="logo" onClick={goHome}><span>AZ</span><strong>104 SPRINT</strong></button><nav className="nav"><button className={screen==='home'?'active':''} onClick={goHome}>Practice</button><button className={screen==='progress'?'active':''} onClick={()=>setScreen('progress')}>Progress <b>{history.length}</b></button><a href="https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/az-104" target="_blank">Study guide ↗</a></nav></header>
 
     {screen==='home'&&<section className="home">
       <div className="hero"><p className="kicker">AZURE ADMINISTRATOR // COMPLETE BLUEPRINT</p><h1>Train to <em>800.</em><br/>Pass with confidence.</h1><p className="lede">{questions.length} original questions across every objective in Microsoft’s current AZ-104 outline—from Entra and storage to compute, networking, monitoring, backup, and recovery.</p><div className="target"><b>800<small>TARGET</small></b><span><strong>Your safety margin</strong><p>Microsoft requires 700. Aim higher so exam-day nerves have room to breathe.</p></span></div></div>
-      <div className="card"><p className="kicker">CHOOSE A TRAINING MODE</p><div className="modes"><button className={mode==='sprint'?'sel':''} onClick={()=>setMode('sprint')}><b>10</b><span>Quick sprint<small>Instant teaching feedback</small></span></button><button className={mode==='mock'?'sel':''} onClick={()=>{setMode('mock');setDomain(domains[0])}}><b>50</b><span>Mock exam<small>All domains · 100 min target</small></span></button><button className={mode==='review'?'sel':''} disabled={!mistakeIds.length||mistakeStatus==='loading'} onClick={()=>{setMode('review');setDomain(domains[0])}}><b>{mistakeStatus==='loading'?'…':mistakeIds.length}</b><span>Review mistakes<small>{mistakeIds.length?'Clear remembered misses':'No mistakes waiting'}</small></span></button></div>
+      <div className="card"><p className="kicker">CHOOSE A TRAINING MODE</p><div className="modes"><button className={mode==='sprint'?'sel':''} onClick={()=>setMode('sprint')}><b>10</b><span>Quick sprint<small>Instant teaching feedback</small></span></button><button className={mode==='mock'?'sel':''} onClick={()=>{setMode('mock');setDomain(domains[0])}}><b>50</b><span>Exam simulator<small>100 min · case studies · flags</small></span></button><button className={mode==='review'?'sel':''} disabled={!mistakeIds.length||mistakeStatus==='loading'} onClick={()=>{setMode('review');setDomain(domains[0])}}><b>{mistakeStatus==='loading'?'…':mistakeIds.length}</b><span>Review mistakes<small>{mistakeIds.length?'Clear remembered misses':'No mistakes waiting'}</small></span></button></div>
         {mode==='sprint'&&<><h2>Choose your focus</h2><div className="domains">{domains.map(item=><button className={domain===item?'sel':''} onClick={()=>setDomain(item)} key={item}>{item===domains[0]?'⚡ Mixed review':item}<small>{item===domains[0]?questions.length+' questions total':questions.filter(q=>q.domain===item).length+' questions'}</small></button>)}</div></>}
-        {mode==='mock'&&<div className="mock-note"><span>SIMULATION</span><strong>50 questions from the full blueprint</strong><p>Answers stay hidden until the end. Your score and time are saved automatically.</p></div>}
+        {mode==='mock'&&<div className="mock-note"><span>EXAM-DAY SIMULATION</span><strong>50 questions with two case-study sets</strong><p>Navigate freely, change answers, flag questions, and review unanswered items. Results stay hidden until final submission.</p></div>}
         {mode==='review'&&<div className="mock-note mistake-note"><span>MEMORY REPAIR</span><strong>{mistakeIds.length} question{mistakeIds.length===1?'':'s'} waiting for review</strong><p>Answer one correctly to remove it. Miss it again and it stays in your queue.</p></div>}
-        <button className="primary" disabled={mistakeStatus==='loading'} onClick={()=>start()}>{mistakeStatus==='loading'?'Loading review history…':mode==='mock'?'Start full mock exam':mode==='review'?`Review ${Math.min(10,mistakeIds.length)} mistake${Math.min(10,mistakeIds.length)===1?'':'s'}`:'Start 10-question sprint'} <span>→</span></button><small className="fine">{historyStatus==='local'||mistakeStatus==='local'?'Your scores and missed questions stay in this browser on this device.':'Your scores and missed questions are saved privately to this site.'}</small>
+        <button className="primary" disabled={mistakeStatus==='loading'} onClick={()=>start()}>{mistakeStatus==='loading'?'Loading review history…':mode==='mock'?'Start exam simulator':mode==='review'?`Review ${Math.min(10,mistakeIds.length)} mistake${Math.min(10,mistakeIds.length)===1?'':'s'}`:'Start 10-question sprint'} <span>→</span></button><small className="fine">{historyStatus==='local'||mistakeStatus==='local'?'Your scores and missed questions stay in this browser on this device.':'Your scores and missed questions are saved privately to this site.'}</small>
       </div>
       <div className="blueprint"><p>2026 EXAM BLUEPRINT</p>{[['Identity & governance','20–25%'],['Compute','20–25%'],['Storage','15–20%'],['Networking','15–20%'],['Monitoring & recovery','10–15%']].map(item=><div key={item[0]}><span>{item[0]}</span><i/><b>{item[1]}</b></div>)}</div>
     </section>}
 
     {screen==='progress'&&<section className="progress-page">
-      <div className="progress-head"><div><p className="kicker">YOUR SCORE HISTORY</p><h1>Are you ready for 800?</h1><p>Every completed sprint and mock exam contributes to your trend.</p></div><button className="primary" onClick={goHome}>Train now →</button></div>
+      <div className="progress-head"><div><p className="kicker">YOUR SCORE HISTORY</p><h1>Are you ready for 800?</h1><p>Every completed sprint and exam simulation contributes to your trend.</p></div><button className="primary" onClick={goHome}>Train now →</button></div>
       <div className="stat-grid"><article><small>PERSONAL BEST</small><strong>{best||'—'}</strong><span>/ 1000</span></article><article><small>AVERAGE SCORE</small><strong>{average||'—'}</strong><span>{history.length?'all attempts':'no attempts'}</span></article><article><small>COMPLETED</small><strong>{history.length}</strong><span>attempts</span></article><article><small>800+ SCORES</small><strong>{targetHits}</strong><span>{history.length?Math.round(targetHits/history.length*100)+'% hit rate':'target passes'}</span></article></div>
       <div className="progress-grid"><article className="trend-card"><div className="panel-title"><div><h2>Recent trend</h2><p>Last 12 completed attempts</p></div><span className={average>=800?'ready':'building'}>{average>=800?'ON TARGET':'BUILDING'}</span></div>
         {history.length?<div className="chart"><div className="target-line"><span>800</span></div>{[...history].slice(0,12).reverse().map(item=><div className="bar-wrap" key={item.id}><b>{item.score}</b><i className={item.score>=800?'hit':''} style={{height:Math.max(8,item.score/10)+'%'}}/><small>{new Date(dateValue(item.created_at)).toLocaleDateString('en-GB',{day:'2-digit',month:'short'})}</small></div>)}</div>:<div className="empty-state"><b>⌁</b><h3>Your trend starts after one completed round.</h3><button onClick={goHome}>Take a sprint</button></div>}
       </article><aside className="readiness"><span>READINESS SIGNAL</span><div className="readiness-ring" style={{'--score':Math.min(100,average/10)*3.6+'deg'} as React.CSSProperties}><b>{average||0}</b><small>AVG</small></div><h3>{average>=800?'Exam-ready momentum':'Build consistency above 800'}</h3><p>{average>=800?'Your average is above the safety target. Keep it there with mixed mocks.':'Focused sprints lift weak areas; full mocks validate progress.'}</p></aside></div>
-      <article className="history-card"><div className="panel-title"><div><h2>Attempt history</h2><p>Newest first · up to 100 attempts</p></div>{historyStatus==='local'&&<span className="local-note">SAVED ON THIS DEVICE</span>}{historyStatus==='error'&&<span className="sync-error">Sync needs a retry</span>}</div>{history.length?<div className="history-table"><div className="history-row labels"><span>Date</span><span>Mode</span><span>Focus</span><span>Accuracy</span><span>Time</span><span>Score</span></div>{history.map(item=><div className="history-row" key={item.id}><span>{fmtDate(item.created_at)}</span><span><b className="mode-pill">{item.mode==='mock'?'Mock 50':item.domain==='Review mistakes'?'Review':'Sprint'}</b></span><span>{item.domain}</span><span>{item.correct_answers}/{item.total_questions}</span><span>{fmtTime(item.elapsed_seconds)}</span><strong className={item.score>=800?'pass-text':''}>{item.score}</strong></div>)}</div>:<div className="loading">{historyStatus==='loading'?'Loading your scores…':'No completed attempts yet.'}</div>}</article>
+      <article className="history-card"><div className="panel-title"><div><h2>Attempt history</h2><p>Newest first · up to 100 attempts</p></div>{historyStatus==='local'&&<span className="local-note">SAVED ON THIS DEVICE</span>}{historyStatus==='error'&&<span className="sync-error">Sync needs a retry</span>}</div>{history.length?<div className="history-table"><div className="history-row labels"><span>Date</span><span>Mode</span><span>Focus</span><span>Accuracy</span><span>Time</span><span>Score</span></div>{history.map(item=><div className="history-row" key={item.id}><span>{fmtDate(item.created_at)}</span><span><b className="mode-pill">{item.mode==='mock'?'Exam 50':item.domain==='Review mistakes'?'Review':'Sprint'}</b></span><span>{item.domain}</span><span>{item.correct_answers}/{item.total_questions}</span><span>{fmtTime(item.elapsed_seconds)}</span><strong className={item.score>=800?'pass-text':''}>{item.score}</strong></div>)}</div>:<div className="loading">{historyStatus==='loading'?'Loading your scores…':'No completed attempts yet.'}</div>}</article>
     </section>}
 
-    {screen==='quiz'&&current&&<section className="quiz"><aside><button onClick={goHome}>← Exit {mode==='mock'?'mock':mode==='review'?'review':'sprint'}</button><p>{mode==='mock'?'MOCK EXAM':mode==='review'?'REVIEW SET':'QUESTION'}</p><strong>{String(index+1).padStart(2,'0')} <small>/ {String(round.length).padStart(2,'0')}</small></strong><div className="progress"><i style={{width:(index+(picked!==null?1:0))/round.length*100+'%'}}/></div><dl><div><dt>{mode==='mock'?'Answered':'Score'}</dt><dd>{mode==='mock'?answers.length:right+'/'+answers.length}</dd></div><div><dt>Streak</dt><dd>{mode==='mock'?'—':'×'+streak}</dd></div><div><dt>{mode==='mock'?'Remaining':'Time'}</dt><dd>{mode==='mock'?fmtTime(Math.max(0,6000-seconds)):fmtTime(seconds)}</dd></div></dl>{mode==='mock'&&<small className="hidden-note">ANSWERS HIDDEN UNTIL RESULTS</small>}</aside>
-      <article className="qcard"><div className="qtop"><span>{current.domain}</span><small>{current.objective.toUpperCase()}</small></div><h2>{current.prompt}</h2><div className="options">{current.options.map((option,i)=>{const state=picked===null?'':mode==='mock'?(i===picked?'selected':'dim'):i===current.answer?'correct':i===picked?'wrong':'dim';return <button key={option} className={state} onClick={()=>choose(i)}><b>{String.fromCharCode(65+i)}</b>{option}{mode!=='mock'&&picked!==null&&i===current.answer&&<i>✓</i>}{mode!=='mock'&&picked===i&&i!==current.answer&&<i>×</i>}</button>})}</div>
+    {screen==='examReview'&&<section className="exam-review-page">
+      <div className="exam-review-head"><div><p className="kicker">FINAL REVIEW</p><h1>Check your exam before submitting.</h1><p>Select any question to return to it. The clock continues while you review.</p></div><div className="exam-clock"><small>TIME REMAINING</small><strong>{fmtTime(Math.max(0,6000-seconds))}</strong></div></div>
+      <div className="exam-summary"><article><small>ANSWERED</small><strong>{answers.length}</strong><span>of {round.length}</span></article><article className={unansweredCount?'warn':''}><small>UNANSWERED</small><strong>{unansweredCount}</strong><span>{unansweredCount?'needs attention':'complete'}</span></article><article><small>FLAGGED</small><strong>{flagged.length}</strong><span>for review</span></article></div>
+      <article className="exam-review-card"><div className="exam-review-title"><div><h2>Question navigator</h2><p>Blue is answered, amber is flagged, and outlined questions are unanswered.</p></div></div><div className="exam-review-grid">{round.map((question,questionIndex)=>{const classes=[answeredIds.has(question.id)?'answered':'',flagged.includes(question.id)?'flagged':''].filter(Boolean).join(' ');return <button key={question.id} className={classes} onClick={()=>goQuestion(questionIndex)} aria-label={`Open question ${questionIndex+1}`}>{questionIndex+1}{flagged.includes(question.id)&&<i>⚑</i>}</button>})}</div>
+        {unansweredCount>0&&<div className="exam-warning"><strong>{unansweredCount} unanswered question{unansweredCount===1?'':'s'}.</strong><span>Unanswered questions will be marked incorrect if you submit now.</span></div>}
+        <div className="exam-submit-actions"><button onClick={()=>setScreen('quiz')}>Resume exam</button><button className="primary" onClick={finishExam}>Submit final answers →</button></div>
+      </article>
+    </section>}
+
+    {screen==='quiz'&&current&&<section className="quiz"><aside><button onClick={goHome}>← Exit {mode==='mock'?'exam':mode==='review'?'review':'sprint'}</button><p>{mode==='mock'?'EXAM SIMULATOR':mode==='review'?'REVIEW SET':'QUESTION'}</p><strong>{String(index+1).padStart(2,'0')} <small>/ {String(round.length).padStart(2,'0')}</small></strong><div className="progress"><i style={{width:(mode==='mock'?answers.length:(index+(picked!==null?1:0)))/round.length*100+'%'}}/></div><dl><div><dt>{mode==='mock'?'Answered':'Score'}</dt><dd>{mode==='mock'?answers.length:right+'/'+answers.length}</dd></div><div><dt>{mode==='mock'?'Flagged':'Streak'}</dt><dd>{mode==='mock'?flagged.length:'×'+streak}</dd></div><div><dt>{mode==='mock'?'Remaining':'Time'}</dt><dd>{mode==='mock'?fmtTime(Math.max(0,6000-seconds)):fmtTime(seconds)}</dd></div></dl>{mode==='mock'&&<><small className="hidden-note">ANSWERS HIDDEN UNTIL RESULTS</small><div className="exam-tools"><span>QUESTION NAVIGATOR</span><div className="exam-grid">{round.map((question,questionIndex)=>{const classes=[questionIndex===index?'current':'',answeredIds.has(question.id)?'answered':'',flagged.includes(question.id)?'flagged':''].filter(Boolean).join(' ');return <button key={question.id} className={classes} onClick={()=>goQuestion(questionIndex)} aria-label={`Open question ${questionIndex+1}`}>{questionIndex+1}{flagged.includes(question.id)&&<i>⚑</i>}</button>})}</div><button className="review-exam-btn" onClick={()=>setScreen('examReview')}>Review & submit</button></div></>}</aside>
+      <article className="qcard"><div className="qtop"><span>{current.domain}</span><small>{current.objective.toUpperCase()}</small></div>{current.caseStudy&&<section className="case-study"><span>CASE STUDY</span><h3>{current.caseStudy.title}</h3><p>{current.caseStudy.context}</p><strong>Requirements</strong><ul>{current.caseStudy.requirements.map(requirement=><li key={requirement}>{requirement}</li>)}</ul></section>}<h2>{current.prompt}</h2><div className="options">{current.options.map((option,i)=>{const state=picked===null?'':mode==='mock'?(i===picked?'selected':'dim'):i===current.answer?'correct':i===picked?'wrong':'dim';return <button key={option} className={state} onClick={()=>choose(i)}><b>{String.fromCharCode(65+i)}</b>{option}{mode!=='mock'&&picked!==null&&i===current.answer&&<i>✓</i>}{mode!=='mock'&&picked===i&&i!==current.answer&&<i>×</i>}</button>})}</div>
         {picked!==null&&mode!=='mock'&&<div className={'feedback '+(picked===current.answer?'good':'bad')}><strong>{picked===current.answer?(mode==='review'?'Correct — removed from your mistake queue.':'Correct — lock it in.'):'Not quite — this stays in your mistake queue.'}</strong><p>{current.explanation}</p><button onClick={next}>{index===round.length-1?'See my score':'Next question'} →</button></div>}
-        {picked!==null&&mode==='mock'&&<div className="mock-next"><span>Answer locked</span><button onClick={next}>{index===round.length-1?'Finish mock exam':'Next question'} →</button></div>}
+        {mode==='mock'&&<div className="mock-next exam-controls"><button onClick={()=>goQuestion(index-1)} disabled={index===0}>← Previous</button><button className={flagged.includes(current.id)?'flag-active':''} onClick={toggleFlag}>{flagged.includes(current.id)?'⚑ Flagged':'⚐ Flag for review'}</button><button onClick={next}>{index===round.length-1?'Review & submit':'Next question'} →</button></div>}
       </article></section>}
 
-    {screen==='result'&&<section className="result"><p className="kicker">{mode==='mock'?'MOCK EXAM COMPLETE':mode==='review'?'REVIEW COMPLETE':'SPRINT COMPLETE'}</p><div className={'score '+(score>=800?'pass':'')}><b>{score}</b><small>/ 1000</small></div><h1>{mode==='review'&&!mistakeIds.length?'Mistake queue cleared.':score>=800?'You hit the target.':'One more focused lap.'}</h1><p>{right} of {round.length} correct in {fmtTime(seconds)}. {mode==='review'?`${mistakeIds.length} remembered mistake${mistakeIds.length===1?'':'s'} remaining.`:score>=800?'Keep repeating until 800 feels routine.':'Review the misses, then attack your weakest area.'}</p><div className="saved-badge">{historyStatus==='error'?'△ Score could not be saved':historyStatus==='local'?'✓ Score saved on this device':'✓ Score saved to your history'}</div><div className="actions">{mode==='review'&&!mistakeIds.length?<button className="primary" onClick={goHome}>All cleared ✓</button>:<button className="primary" onClick={()=>start()}>Retry {mode==='mock'?'mock':mode==='review'?'mistakes':'focus'} →</button>}<button onClick={()=>setScreen('progress')}>View progress</button><button onClick={goHome}>Change mode</button></div>{weak&&<div className="weak"><small>WEAKEST AREA</small><strong>{weak}</strong><button onClick={()=>start('sprint',weak)}>Drill this next →</button></div>}<div className="review"><h2>Review your answers</h2>{answers.map((answer,i)=><div key={answer.q.id}><b className={answer.ok?'yes':'no'}>{answer.ok?'✓':'×'}</b><span><small>Q{i+1} · {answer.q.domain} · {answer.q.objective}</small>{answer.q.prompt}{!answer.ok&&<em>Correct: {answer.q.options[answer.q.answer]}. {answer.q.explanation}</em>}</span></div>)}</div></section>}
+    {screen==='result'&&<section className="result"><p className="kicker">{mode==='mock'?'EXAM SIMULATOR COMPLETE':mode==='review'?'REVIEW COMPLETE':'SPRINT COMPLETE'}</p><div className={'score '+(score>=800?'pass':'')}><b>{score}</b><small>/ 1000</small></div><h1>{mode==='review'&&!mistakeIds.length?'Mistake queue cleared.':score>=800?'You hit the target.':'One more focused lap.'}</h1><p>{right} of {round.length} correct in {fmtTime(seconds)}. {mode==='review'?`${mistakeIds.length} remembered mistake${mistakeIds.length===1?'':'s'} remaining.`:score>=800?'Keep repeating until 800 feels routine.':'Review the misses, then attack your weakest area.'}</p><div className="saved-badge">{historyStatus==='error'?'△ Score could not be saved':historyStatus==='local'?'✓ Score saved on this device':'✓ Score saved to your history'}</div><div className="actions">{mode==='review'&&!mistakeIds.length?<button className="primary" onClick={goHome}>All cleared ✓</button>:<button className="primary" onClick={()=>start()}>Retry {mode==='mock'?'exam':mode==='review'?'mistakes':'focus'} →</button>}<button onClick={()=>setScreen('progress')}>View progress</button><button onClick={goHome}>Change mode</button></div>{weak&&<div className="weak"><small>WEAKEST AREA</small><strong>{weak}</strong><button onClick={()=>start('sprint',weak)}>Drill this next →</button></div>}<div className="review"><h2>Review your answers</h2>{answers.map((answer,i)=><div key={answer.q.id}><b className={answer.ok?'yes':'no'}>{answer.ok?'✓':'×'}</b><span><small>Q{i+1} · {answer.q.domain} · {answer.q.objective}{answer.pick===-1?' · Unanswered':''}</small>{answer.q.prompt}{!answer.ok&&<em>Correct: {answer.q.options[answer.q.answer]}. {answer.q.explanation}</em>}</span></div>)}</div></section>}
     <footer>Independent study aid · Original questions aligned to Microsoft’s AZ-104 skills outline · Updated August 2026</footer>
   </main>
 }

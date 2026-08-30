@@ -1,3 +1,10 @@
+export type CaseStudy = {
+  id: string;
+  title: string;
+  context: string;
+  requirements: string[];
+};
+
 export type Question = {
   id: number;
   domain: string;
@@ -6,9 +13,44 @@ export type Question = {
   options: string[];
   answer: number;
   explanation: string;
+  caseStudy?: CaseStudy;
 };
 
 const q = (domain:string, objective:string, prompt:string, options:string[], answer:number, explanation:string): Omit<Question,'id'> => ({domain,objective,prompt,options,answer,explanation});
+const cq = (caseStudy:CaseStudy, domain:string, objective:string, prompt:string, options:string[], answer:number, explanation:string): Omit<Question,'id'> => ({domain,objective,prompt,options,answer,explanation,caseStudy});
+
+const contosoRetail:CaseStudy={
+  id:'contoso-retail',
+  title:'Contoso Retail governance rollout',
+  context:'Contoso operates production and development subscriptions under one Microsoft Entra tenant. A central platform team manages governance. Branch applications access a storage account from an Azure VNet and from an on-premises network connected by VPN. An external supplier supports one production resource group.',
+  requirements:[
+    'Production resources must be limited to approved Azure regions.',
+    'Storage traffic must use private addressing and private name resolution.',
+    'The supplier must use its existing identity and receive only the permissions required.',
+  ],
+};
+
+const fabrikamApps:CaseStudy={
+  id:'fabrikam-apps',
+  title:'Fabrikam application modernisation',
+  context:'Fabrikam hosts a customer API in Azure App Service. Releases are validated before production, the API makes outbound calls to a database on a virtual network, and operations staff need immediate notification when availability falls below the agreed threshold.',
+  requirements:[
+    'New releases must be tested on a live endpoint before production deployment.',
+    'Outbound application traffic must reach private resources in the VNet.',
+    'Alert notifications must reach the on-call team and trigger automation.',
+  ],
+};
+
+const northwindRecovery:CaseStudy={
+  id:'northwind-recovery',
+  title:'Northwind regional recovery plan',
+  context:'Northwind runs business-critical Azure VMs in one region. The company needs orchestrated recovery to a second region, daily backups with defined retention, and centralized reporting for backup jobs and recovery tests.',
+  requirements:[
+    'A disaster-recovery test must not interrupt production or ongoing replication.',
+    'Backup schedules and retention must be applied consistently.',
+    'Operations staff need cross-vault reporting in one workspace.',
+  ],
+};
 
 const items: Omit<Question,'id'>[] = [
   q('Identity & governance','Users and groups','You need a group whose membership updates automatically from each user’s department property. Which group type should you use?',['Assigned security group','Dynamic user security group','Microsoft 365 assigned group','Administrative unit'],1,'A dynamic user group evaluates a membership rule against user properties such as department.'),
@@ -94,7 +136,19 @@ const items: Omit<Question,'id'>[] = [
   q('Monitoring & recovery','Backup restore','Which Azure VM restore option creates disks from a recovery point for custom recovery steps?',['Restore disks','Replace all resource groups','Reapply NSG','Swap deployment slot'],0,'Restore disks produces managed disks and a template so you can control VM reconstruction.'),
   q('Monitoring & recovery','Site Recovery','Which service provides orchestrated regional disaster recovery for Azure VMs?',['Azure Site Recovery','Azure Update Manager','Azure Advisor','Application Insights'],0,'Site Recovery replicates workloads and orchestrates failover and failback.'),
   q('Monitoring & recovery','Failover','What should you run to validate a Site Recovery plan without affecting production replication?',['Test failover','Unplanned failover','Commit','Delete recovery points'],0,'A test failover validates recovery in an isolated network without interrupting ongoing replication.'),
-  q('Monitoring & recovery','Backup reporting','What centralizes Azure Backup job, policy, and usage reporting across vaults?',['Backup reports using Azure Monitor Logs','Public IP diagnostics','App Service deployment logs','DNS analytics only'],0,'Backup reports use diagnostic data in Log Analytics for cross-vault reporting and analysis.')
+  q('Monitoring & recovery','Backup reporting','What centralizes Azure Backup job, policy, and usage reporting across vaults?',['Backup reports using Azure Monitor Logs','Public IP diagnostics','App Service deployment logs','DNS analytics only'],0,'Backup reports use diagnostic data in Log Analytics for cross-vault reporting and analysis.'),
+
+  cq(contosoRetail,'Identity & governance','Azure Policy','Which control should the platform team assign to restrict production resource locations?',['An Azure Policy definition with a Deny effect','A CanNotDelete resource lock','A Cost Management budget','A dynamic Microsoft Entra group'],0,'A policy that evaluates resource location and uses Deny prevents deployment outside the approved regions.'),
+  cq(contosoRetail,'Networking','Private endpoints','Which design satisfies the private storage-access and name-resolution requirement?',['A private endpoint plus the appropriate linked private DNS zone','A service endpoint plus a public DNS CNAME','A NAT Gateway plus an application security group','A public IP prefix plus a route table'],0,'A private endpoint gives the storage service a private IP in the VNet, while the linked privatelink DNS zone resolves the normal service name to that address.'),
+  cq(contosoRetail,'Identity & governance','External identities and RBAC','How should the supplier receive access to the production resource group?',['Create a B2B guest identity and assign the least-privileged Azure role at resource-group scope','Create a shared Global Administrator account','Give the supplier a storage account key','Assign Owner at management-group scope'],0,'B2B collaboration lets the supplier use an existing identity, and a narrowly scoped RBAC assignment applies least privilege.'),
+
+  cq(fabrikamApps,'Compute','Deployment slots','Which App Service feature should Fabrikam use to validate a release before it receives production traffic?',['A deployment slot','An availability set','A proximity placement group','A resource lock'],0,'A deployment slot provides a live staging endpoint and supports a controlled swap into production.'),
+  cq(fabrikamApps,'Compute','App Service networking','Which feature enables the API to make outbound calls to the private database?',['Regional VNet integration','A custom domain','A private certificate binding','An App Service backup'],0,'Regional VNet integration provides outbound connectivity from App Service into a virtual network.'),
+  cq(fabrikamApps,'Monitoring & recovery','Azure Monitor alerts','What should the availability alert reference to notify the on-call team and run automation?',['An action group','A data collection endpoint','A workbook','A resource lock'],0,'An action group defines notification receivers and automated actions for an Azure Monitor alert.'),
+
+  cq(northwindRecovery,'Monitoring & recovery','Site Recovery testing','Which operation validates regional recovery without interrupting production replication?',['Test failover','Unplanned failover','Commit failover','Disable replication'],0,'A test failover creates an isolated recovery test while normal replication continues.'),
+  cq(northwindRecovery,'Monitoring & recovery','Backup policies','Where should Northwind define the required backup schedule and retention?',['An Azure Backup policy','A network security group','A resource tag','A private DNS zone'],0,'An Azure Backup policy defines when recovery points are created and how long they are retained.'),
+  cq(northwindRecovery,'Monitoring & recovery','Backup reporting','Which configuration supports centralized cross-vault backup reporting?',['Send vault diagnostic data to Log Analytics and use Backup reports','Export VM disks to a public container','Create one action group per VM','Enable boot diagnostics only'],0,'Backup reports use diagnostic data stored in a Log Analytics workspace to provide centralized cross-vault reporting.')
 ];
 
 export const questions: Question[] = items.map((item,index)=>({...item,id:index+1}));
