@@ -5,7 +5,8 @@ import {domains,Question,questions} from './questions';
 type Screen='home'|'quiz'|'examReview'|'result'|'progress';
 type Mode='sprint'|'mock'|'review';
 type Answer={q:Question;pick:number;ok:boolean};
-type Attempt={id:number;score:number;correct_answers:number;total_questions:number;elapsed_seconds:number;mode:'sprint'|'mock';domain:string;created_at:string};
+type DomainResult={correct:number;total:number};
+type Attempt={id:number;score:number;correct_answers:number;total_questions:number;elapsed_seconds:number;mode:'sprint'|'mock';domain:string;created_at:string;domain_breakdown?:Record<string,DomainResult>};
 const shuffle=<T,>(items:T[])=>[...items].sort(()=>Math.random()-.5);
 const fmtTime=(value:number)=>Math.floor(value/60)+':'+String(value%60).padStart(2,'0');
 const dateValue=(value:string)=>value.includes('T')?value:value.replace(' ','T')+'Z';
@@ -28,6 +29,20 @@ const loadLocalMistakes=()=>{
   return Array.isArray(ids)?ids.filter((id):id is number=>Number.isInteger(id)&&questions.some(question=>question.id===id)):[];
 };
 const saveLocalMistakes=(ids:number[])=>localStorage.setItem('az104-mistakes',JSON.stringify(ids));
+const answerBreakdown=(items:Answer[])=>items.reduce<Record<string,DomainResult>>((results,answer)=>{
+  results[answer.q.domain]??={correct:0,total:0};
+  results[answer.q.domain].total++;
+  if(answer.ok)results[answer.q.domain].correct++;
+  return results;
+},{});
+const aggregateDomains=(attempts:Attempt[])=>domains.slice(1).map(name=>{
+  const totals=attempts.reduce<DomainResult>((result,attempt)=>{
+    const value=attempt.domain_breakdown?.[name];
+    if(value){result.correct+=value.correct;result.total+=value.total}
+    return result;
+  },{correct:0,total:0});
+  return {...totals,name,percent:totals.total?Math.round(totals.correct/totals.total*100):0};
+});
 
 export default function Home(){
   const[screen,setScreen]=useState<Screen>('home');
@@ -54,6 +69,23 @@ export default function Home(){
   const best=Math.max(0,...history.map(x=>x.score));
   const average=history.length?Math.round(history.reduce((sum,x)=>sum+x.score,0)/history.length):0;
   const targetHits=history.filter(x=>x.score>=800).length;
+  const domainStats=useMemo(()=>aggregateDomains(history),[history]);
+  const recentExams=useMemo(()=>history.filter(attempt=>attempt.mode==='mock').slice(0,3),[history]);
+  const recentExamAverage=recentExams.length?Math.round(recentExams.reduce((sum,attempt)=>sum+attempt.score,0)/recentExams.length):0;
+  const recentExamDomains=useMemo(()=>aggregateDomains(recentExams),[recentExams]);
+  const weakestDomain=domainStats.filter(item=>item.total).sort((a,b)=>a.percent-b.percent)[0];
+  const weakestRecentDomain=recentExamDomains.filter(item=>item.total).sort((a,b)=>a.percent-b.percent)[0];
+  const recentDomainFloor=Math.min(100,...recentExamDomains.filter(item=>item.total).map(item=>item.percent));
+  const threeExamBaseline=recentExams.length===3;
+  const examReady=threeExamBaseline&&recentExams.every(attempt=>attempt.score>=800)&&recentDomainFloor>=70;
+  const nearlyReady=threeExamBaseline&&recentExamAverage>=750&&recentDomainFloor>=60;
+  const readiness=examReady
+    ?{label:'READY TO BOOK',title:'Three strong exams in a row',detail:'You scored 800+ on all three recent full simulations, with every domain at 70% or better.',tone:'ready'}
+    :nearlyReady
+      ?{label:'NEARLY READY',title:'Close—repair the weakest domain',detail:`Your last three full exams average ${recentExamAverage}. Push every domain above 70%, then repeat 800+.`,tone:'near'}
+      :threeExamBaseline
+        ?{label:'BUILDING',title:'More exam reps needed',detail:`Your last three full exams average ${recentExamAverage}. Drill ${weakestRecentDomain?.name??'your weakest area'}, then retest.`,tone:'building'}
+        :{label:'BASELINE NEEDED',title:`Complete ${3-recentExams.length} more full exam${3-recentExams.length===1?'':'s'}`,detail:'Readiness is based on three recent 50-question simulations, not quick sprints.',tone:'baseline'};
   const right=answers.filter(x=>x.ok).length;
   const score=Math.round(right/Math.max(round.length,1)*1000);
   const answeredIds=useMemo(()=>new Set(answers.map(answer=>answer.q.id)),[answers]);
@@ -91,12 +123,13 @@ export default function Home(){
     if(mode==='mock'){setAnswers(items=>[...items.filter(answer=>answer.q.id!==current.id),nextAnswer]);return;}
     setAnswers(items=>[...items,nextAnswer]);setStreak(value=>nextAnswer.ok?value+1:0);trackMistake(current.id,nextAnswer.ok);
   };
-  const saveAttempt=async(finalScore:number,correct:number)=>{
+  const saveAttempt=async(finalScore:number,correct:number,answerItems:Answer[]=answers)=>{
     const storedMode=mode==='mock'?'mock':'sprint';
     const storedDomain=mode==='mock'?'All domains':mode==='review'?'Review mistakes':domain;
-    const optimistic:Attempt={id:-Date.now(),score:finalScore,correct_answers:correct,total_questions:round.length,elapsed_seconds:seconds,mode:storedMode,domain:storedDomain,created_at:new Date().toISOString()};
+    const domain_breakdown=answerBreakdown(answerItems);
+    const optimistic:Attempt={id:-Date.now(),score:finalScore,correct_answers:correct,total_questions:round.length,elapsed_seconds:seconds,mode:storedMode,domain:storedDomain,created_at:new Date().toISOString(),domain_breakdown};
     setHistory(items=>[optimistic,...items]);
-    try{const response=await fetch('/api/scores',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({score:finalScore,correct_answers:correct,total_questions:round.length,elapsed_seconds:seconds,mode:storedMode,domain:storedDomain})});if(!response.ok)throw new Error();const data=await response.json();setHistory(items=>items.map(item=>item.id===optimistic.id?data.attempt:item));setHistoryStatus('ready')}catch{setHistory(items=>{try{localStorage.setItem('az104-history',JSON.stringify(items));setHistoryStatus('local')}catch{setHistoryStatus('error')}return items})}
+    try{const response=await fetch('/api/scores',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({score:finalScore,correct_answers:correct,total_questions:round.length,elapsed_seconds:seconds,mode:storedMode,domain:storedDomain,domain_breakdown})});if(!response.ok)throw new Error();const data=await response.json();setHistory(items=>items.map(item=>item.id===optimistic.id?data.attempt:item));setHistoryStatus('ready')}catch{setHistory(items=>{try{localStorage.setItem('az104-history',JSON.stringify(items));setHistoryStatus('local')}catch{setHistoryStatus('error')}return items})}
   };
   const goQuestion=(targetIndex:number)=>{const target=round[targetIndex];if(!target)return;setIndex(targetIndex);setPicked(answers.find(answer=>answer.q.id===target.id)?.pick??null);setScreen('quiz')};
   const toggleFlag=()=>setFlagged(items=>items.includes(current.id)?items.filter(id=>id!==current.id):[...items,current.id]);
@@ -104,7 +137,7 @@ export default function Home(){
     if(submittedRef.current)return;submittedRef.current=true;
     const finalAnswers=round.map(question=>answers.find(answer=>answer.q.id===question.id)??{q:question,pick:-1,ok:false});
     const finalRight=finalAnswers.filter(answer=>answer.ok).length;
-    setAnswers(finalAnswers);trackExamMistakes(finalAnswers);setScreen('result');void saveAttempt(Math.round(finalRight/round.length*1000),finalRight);
+    setAnswers(finalAnswers);trackExamMistakes(finalAnswers);setScreen('result');void saveAttempt(Math.round(finalRight/round.length*1000),finalRight,finalAnswers);
   };
   const next=()=>{
     if(mode==='mock'){if(index<round.length-1){goQuestion(index+1)}else{setScreen('examReview')}return;}
@@ -134,7 +167,10 @@ export default function Home(){
       <div className="stat-grid"><article><small>PERSONAL BEST</small><strong>{best||'—'}</strong><span>/ 1000</span></article><article><small>AVERAGE SCORE</small><strong>{average||'—'}</strong><span>{history.length?'all attempts':'no attempts'}</span></article><article><small>COMPLETED</small><strong>{history.length}</strong><span>attempts</span></article><article><small>800+ SCORES</small><strong>{targetHits}</strong><span>{history.length?Math.round(targetHits/history.length*100)+'% hit rate':'target passes'}</span></article></div>
       <div className="progress-grid"><article className="trend-card"><div className="panel-title"><div><h2>Recent trend</h2><p>Last 12 completed attempts</p></div><span className={average>=800?'ready':'building'}>{average>=800?'ON TARGET':'BUILDING'}</span></div>
         {history.length?<div className="chart"><div className="target-line"><span>800</span></div>{[...history].slice(0,12).reverse().map(item=><div className="bar-wrap" key={item.id}><b>{item.score}</b><i className={item.score>=800?'hit':''} style={{height:Math.max(8,item.score/10)+'%'}}/><small>{new Date(dateValue(item.created_at)).toLocaleDateString('en-GB',{day:'2-digit',month:'short'})}</small></div>)}</div>:<div className="empty-state"><b>⌁</b><h3>Your trend starts after one completed round.</h3><button onClick={goHome}>Take a sprint</button></div>}
-      </article><aside className="readiness"><span>READINESS SIGNAL</span><div className="readiness-ring" style={{'--score':Math.min(100,average/10)*3.6+'deg'} as React.CSSProperties}><b>{average||0}</b><small>AVG</small></div><h3>{average>=800?'Exam-ready momentum':'Build consistency above 800'}</h3><p>{average>=800?'Your average is above the safety target. Keep it there with mixed mocks.':'Focused sprints lift weak areas; full mocks validate progress.'}</p></aside></div>
+      </article><aside className={`readiness ${readiness.tone}`}><span>{readiness.label}</span><div className="readiness-ring" style={{'--score':Math.min(100,recentExamAverage/10)*3.6+'deg'} as React.CSSProperties}><b>{recentExamAverage||0}</b><small>3-EXAM AVG</small></div><h3>{readiness.title}</h3><p>{readiness.detail}</p><small className="readiness-count">{recentExams.length}/3 FULL EXAMS RECORDED</small></aside></div>
+      <article className="domain-card"><div className="panel-title"><div><h2>Performance by exam domain</h2><p>All completed attempts with domain data · weighted by questions answered</p></div>{weakestDomain&&<span className="domain-focus">FOCUS: {weakestDomain.name.toUpperCase()}</span>}</div>
+        {domainStats.some(item=>item.total)?<div className="domain-list">{domainStats.map(item=><div className="domain-row" key={item.name}><div><strong>{item.name}</strong><small>{item.total?`${item.correct}/${item.total} correct · ${item.total} questions seen`:'No questions recorded yet'}</small></div><div className="domain-meter"><i style={{width:item.percent+'%'}} className={item.percent>=80?'strong':item.percent>=70?'steady':'focus'}/></div><b className={item.percent>=80?'strong-text':item.percent>=70?'steady-text':'focus-text'}>{item.total?item.percent+'%':'—'}</b><button onClick={()=>start('sprint',item.name)}>Drill</button></div>)}</div>:<div className="domain-empty"><strong>Complete one new sprint or exam to unlock domain analytics.</strong><span>Earlier attempts remain in your history; new attempts add the detailed breakdown.</span></div>}
+      </article>
       <article className="history-card"><div className="panel-title"><div><h2>Attempt history</h2><p>Newest first · up to 100 attempts</p></div>{historyStatus==='local'&&<span className="local-note">SAVED ON THIS DEVICE</span>}{historyStatus==='error'&&<span className="sync-error">Sync needs a retry</span>}</div>{history.length?<div className="history-table"><div className="history-row labels"><span>Date</span><span>Mode</span><span>Focus</span><span>Accuracy</span><span>Time</span><span>Score</span></div>{history.map(item=><div className="history-row" key={item.id}><span>{fmtDate(item.created_at)}</span><span><b className="mode-pill">{item.mode==='mock'?'Exam 50':item.domain==='Review mistakes'?'Review':'Sprint'}</b></span><span>{item.domain}</span><span>{item.correct_answers}/{item.total_questions}</span><span>{fmtTime(item.elapsed_seconds)}</span><strong className={item.score>=800?'pass-text':''}>{item.score}</strong></div>)}</div>:<div className="loading">{historyStatus==='loading'?'Loading your scores…':'No completed attempts yet.'}</div>}</article>
     </section>}
 
