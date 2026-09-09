@@ -411,6 +411,169 @@
 .domain-empty strong { font-size: 11px; }
 .domain-empty span { color: #8794a6; font-size: 9px; }
 
+.resources-page {
+  max-width: 1120px;
+  min-height: calc(100vh - 110px);
+  margin: auto;
+  padding: 58px 28px 90px;
+}
+
+.resources-head {
+  display: grid;
+  grid-template-columns: 1.2fr .8fr;
+  align-items: end;
+  gap: 55px;
+  margin-bottom: 32px;
+}
+
+.resources-head h1 {
+  margin: 9px 0 14px;
+  color: var(--ink);
+  font-size: clamp(38px,6vw,64px);
+  letter-spacing: -.055em;
+  line-height: .96;
+}
+
+.resources-head h1 em {
+  color: var(--blue);
+  font-style: normal;
+}
+
+.resources-head > div:first-child > p:last-child {
+  max-width: 650px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1.65;
+}
+
+.resource-plan {
+  border-left: 4px solid #21b989;
+  border-radius: 9px;
+  background: linear-gradient(145deg,#0b1d37,#113760);
+  padding: 23px 25px;
+  color: #fff;
+}
+
+.resource-plan small {
+  display: block;
+  color: #75c9ff;
+  font-size: .75rem;
+  font-weight: 800;
+  letter-spacing: .14em;
+}
+
+.resource-plan strong {
+  display: block;
+  margin: 8px 0;
+  font-size: 1rem;
+}
+
+.resource-plan p {
+  margin: 0;
+  color: #b7c8da;
+  font-size: .875rem;
+  line-height: 1.55;
+}
+
+.learning-path-list {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 8px 30px #173a5c0a;
+}
+
+.learning-path-list > a {
+  display: grid;
+  grid-template-columns: 62px 1fr auto;
+  align-items: center;
+  gap: 20px;
+  border-top: 1px solid #eaf0f5;
+  padding: 18px 22px;
+  color: inherit;
+  text-decoration: none;
+  transition: background .18s ease,transform .18s ease;
+}
+
+.learning-path-list > a:first-child { border-top: 0; }
+.learning-path-list > a:hover { background: #f4f9ff; }
+
+.learning-path-list > a > b {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 10px;
+  background: #eaf4ff;
+  color: #0872dc;
+  font-size: 14px;
+}
+
+.learning-path-list small {
+  display: block;
+  color: #158568;
+  font-size: .75rem;
+  font-weight: 800;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+
+.learning-path-list strong {
+  display: block;
+  margin-top: 4px;
+  color: #283c55;
+  font-size: 1rem;
+}
+
+.learning-path-list p {
+  margin: 3px 0 0;
+  color: #8190a3;
+  font-size: .875rem;
+}
+
+.learning-path-list i {
+  color: #1977ce;
+  font-size: .75rem;
+  font-style: normal;
+  font-weight: 800;
+  letter-spacing: .1em;
+}
+
+.resource-section-title {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 20px;
+  margin: 42px 0 15px;
+}
+
+.resource-section-title h2 { margin: 0 0 5px; font-size: 19px; }
+.resource-section-title p { margin: 0; color: var(--muted); font-size: .875rem; }
+.resource-section-title button { border: 0; background: transparent; color: #1477d4; font-size: .875rem; font-weight: 750; }
+
+.resource-grid {
+  display: grid;
+  grid-template-columns: repeat(3,1fr);
+  gap: 12px;
+}
+
+.resource-grid > a {
+  min-height: 145px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  padding: 20px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.resource-grid > a:hover { border-color: #9bc8f1; box-shadow: 0 10px 24px #1568ab12; }
+.resource-grid small { color: #168665; font-size: .75rem; font-weight: 800; letter-spacing: .12em; }
+.resource-grid strong { display: block; margin: 9px 0 6px; color: #2b4059; font-size: 1rem; }
+.resource-grid p { margin: 0; color: #7d8c9f; font-size: .875rem; line-height: 1.5; }
+.resource-grid span { display: block; margin-top: 15px; color: #1477d4; font-size: .8125rem; font-weight: 750; }
+
 @media (max-width: 800px) {
   .exam-tools {
     grid-column: 1 / -1;
@@ -432,6 +595,9 @@
     grid-template-columns: minmax(180px,1fr) minmax(130px,1fr) 42px 50px;
     gap: 10px;
   }
+
+  .resources-head { grid-template-columns: 1fr; gap: 25px; }
+  .resource-grid { grid-template-columns: 1fr 1fr; }
 }
 
 @media (max-width: 520px) {
@@ -500,4 +666,12 @@
   .domain-row > div:first-child {
     grid-column: 1 / -1;
   }
+
+  .resources-page { padding: 35px 14px 70px; }
+  .resources-head h1 { font-size: 42px; }
+  .learning-path-list > a { grid-template-columns: 42px 1fr; gap: 12px; padding: 16px 14px; }
+  .learning-path-list > a > b { width: 38px; height: 38px; }
+  .learning-path-list i { display: none; }
+  .resource-section-title { align-items: flex-start; flex-direction: column; }
+  .resource-grid { grid-template-columns: 1fr; }
 }

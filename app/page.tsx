@@ -2,7 +2,7 @@
 import {useEffect,useMemo,useRef,useState} from 'react';
 import {domains,Question,questions} from './questions';
 
-type Screen='home'|'quiz'|'examReview'|'result'|'progress';
+type Screen='home'|'quiz'|'examReview'|'result'|'progress'|'resources';
 type Mode='sprint'|'mock'|'review';
 type Answer={q:Question;pick:number;ok:boolean};
 type DomainResult={correct:number;total:number};
@@ -43,6 +43,21 @@ const aggregateDomains=(attempts:Attempt[])=>domains.slice(1).map(name=>{
   },{correct:0,total:0});
   return {...totals,name,percent:totals.total?Math.round(totals.correct/totals.total*100):0};
 });
+const learningPaths=[
+  {step:'00',domain:'Start here',title:'AZ-104 administrator prerequisites',focus:'Cloud Shell and ARM templates',href:'https://learn.microsoft.com/en-us/training/paths/az-104-administrator-prerequisites/'},
+  {step:'01',domain:'Identity & governance · 20–25%',title:'Manage identities and governance',focus:'Entra ID, RBAC, Policy and subscriptions',href:'https://learn.microsoft.com/en-us/training/paths/az-104-manage-identities-governance/'},
+  {step:'02',domain:'Storage · 15–20%',title:'Implement and manage storage',focus:'Accounts, security, Blob and Azure Files',href:'https://learn.microsoft.com/en-us/training/paths/az-104-manage-storage/'},
+  {step:'03',domain:'Compute · 20–25%',title:'Deploy and manage compute resources',focus:'VMs, availability, App Service and containers',href:'https://learn.microsoft.com/en-us/training/paths/az-104-manage-compute-resources/'},
+  {step:'04',domain:'Networking · 15–20%',title:'Configure and manage virtual networks',focus:'VNets, routing, DNS, load balancing and connectivity',href:'https://learn.microsoft.com/en-us/training/paths/az-104-manage-virtual-networks/'},
+  {step:'05',domain:'Monitoring & recovery · 10–15%',title:'Monitor and back up Azure resources',focus:'Azure Monitor, alerts, Backup and recovery',href:'https://learn.microsoft.com/en-us/training/paths/az-104-monitor-backup-resources/'},
+];
+const examResources=[
+  {tag:'BLUEPRINT',title:'Official AZ-104 study guide',copy:'Use the current skills-measured list as your master checklist.',href:'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/az-104'},
+  {tag:'PRACTICE',title:'Microsoft Practice Assessment',copy:'Take Microsoft’s free assessment after completing the learning paths.',href:'https://learn.microsoft.com/en-us/credentials/certifications/azure-administrator/?practice-assessment-type=certification'},
+  {tag:'REFERENCE',title:'Azure Architecture Center',copy:'See reliable patterns and decision guidance for real Azure designs.',href:'https://learn.microsoft.com/en-us/azure/architecture/'},
+  {tag:'FOUNDATION',title:'Microsoft Learn: Azure training',copy:'Fill any fundamentals gap before spending time on harder scenarios.',href:'https://learn.microsoft.com/en-us/training/azure/'},
+  {tag:'IDENTITY',title:'Microsoft Entra training',copy:'Go deeper on identity concepts that repeatedly appear in AZ-104.',href:'https://learn.microsoft.com/en-us/training/entra/'},
+];
 
 export default function Home(){
   const[screen,setScreen]=useState<Screen>('home');
@@ -149,7 +164,7 @@ export default function Home(){
   useEffect(()=>{if(mode==='mock'&&(screen==='quiz'||screen==='examReview')&&seconds>=6000)finishExam()},[mode,screen,seconds]);
 
   return <main>
-    <header className="top"><button className="logo" onClick={goHome}><span>AZ</span><strong>104 SPRINT</strong></button><nav className="nav"><button className={screen==='home'?'active':''} onClick={goHome}>Practice</button><button className={screen==='progress'?'active':''} onClick={()=>setScreen('progress')}>Progress <b>{history.length}</b></button><a href="https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/az-104" target="_blank">Study guide ↗</a></nav></header>
+    <header className="top"><button className="logo" onClick={goHome}><span>AZ</span><strong>104 SPRINT</strong></button><nav className="nav"><button className={screen==='home'?'active':''} onClick={goHome}>Practice</button><button className={screen==='progress'?'active':''} onClick={()=>setScreen('progress')}>Progress <b>{history.length}</b></button><button className={screen==='resources'?'active':''} onClick={()=>setScreen('resources')}>Learn</button></nav></header>
 
     {screen==='home'&&<section className="home">
       <div className="hero"><p className="kicker">AZURE ADMINISTRATOR // COMPLETE BLUEPRINT</p><h1>Train to <em>800.</em><br/>Pass with confidence.</h1><p className="lede">{questions.length} original questions across every objective in Microsoft’s current AZ-104 outline—from Entra and storage to compute, networking, monitoring, backup, and recovery.</p><div className="target"><b>800<small>TARGET</small></b><span><strong>Your safety margin</strong><p>Microsoft requires 700. Aim higher so exam-day nerves have room to breathe.</p></span></div></div>
@@ -172,6 +187,13 @@ export default function Home(){
         {domainStats.some(item=>item.total)?<div className="domain-list">{domainStats.map(item=><div className="domain-row" key={item.name}><div><strong>{item.name}</strong><small>{item.total?`${item.correct}/${item.total} correct · ${item.total} questions seen`:'No questions recorded yet'}</small></div><div className="domain-meter"><i style={{width:item.percent+'%'}} className={item.percent>=80?'strong':item.percent>=70?'steady':'focus'}/></div><b className={item.percent>=80?'strong-text':item.percent>=70?'steady-text':'focus-text'}>{item.total?item.percent+'%':'—'}</b><button onClick={()=>start('sprint',item.name)}>Drill</button></div>)}</div>:<div className="domain-empty"><strong>Complete one new sprint or exam to unlock domain analytics.</strong><span>Earlier attempts remain in your history; new attempts add the detailed breakdown.</span></div>}
       </article>
       <article className="history-card"><div className="panel-title"><div><h2>Attempt history</h2><p>Newest first · up to 100 attempts</p></div>{historyStatus==='local'&&<span className="local-note">SAVED ON THIS DEVICE</span>}{historyStatus==='error'&&<span className="sync-error">Sync needs a retry</span>}</div>{history.length?<div className="history-table"><div className="history-row labels"><span>Date</span><span>Mode</span><span>Focus</span><span>Accuracy</span><span>Time</span><span>Score</span></div>{history.map(item=><div className="history-row" key={item.id}><span>{fmtDate(item.created_at)}</span><span><b className="mode-pill">{item.mode==='mock'?'Exam 50':item.domain==='Review mistakes'?'Review':'Sprint'}</b></span><span>{item.domain}</span><span>{item.correct_answers}/{item.total_questions}</span><span>{fmtTime(item.elapsed_seconds)}</span><strong className={item.score>=800?'pass-text':''}>{item.score}</strong></div>)}</div>:<div className="loading">{historyStatus==='loading'?'Loading your scores…':'No completed attempts yet.'}</div>}</article>
+    </section>}
+
+    {screen==='resources'&&<section className="resources-page">
+      <div className="resources-head"><div><p className="kicker">OFFICIAL MICROSOFT LEARN PATH</p><h1>Learn the gap.<br/><em>Then drill it.</em></h1><p>Follow the six official paths in order once. After that, use your domain scores to revisit only what is costing you marks.</p></div><div className="resource-plan"><small>FASTEST USE OF YOUR TIME</small><strong>Quiz → weak domain → Learn → drill → full exam</strong><p>Do not restart the entire course after a bad score. Repair the lowest domain, then validate it in the 50-question simulator.</p></div></div>
+      <div className="learning-path-list">{learningPaths.map(path=><a href={path.href} target="_blank" rel="noreferrer" key={path.step}><b>{path.step}</b><span><small>{path.domain}</small><strong>{path.title}</strong><p>{path.focus}</p></span><i>OPEN ↗</i></a>)}</div>
+      <div className="resource-section-title"><div><h2>Exam essentials</h2><p>Current Microsoft sources worth bookmarking. Everything below supports AZ-104 directly.</p></div><button onClick={goHome}>Back to practice →</button></div>
+      <div className="resource-grid">{examResources.map(resource=><a href={resource.href} target="_blank" rel="noreferrer" key={resource.title}><small>{resource.tag}</small><strong>{resource.title}</strong><p>{resource.copy}</p><span>Open Microsoft Learn ↗</span></a>)}</div>
     </section>}
 
     {screen==='examReview'&&<section className="exam-review-page">
