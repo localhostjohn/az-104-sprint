@@ -7,6 +7,11 @@ type Mode='sprint'|'mock'|'review';
 type Answer={q:Question;pick:number;ok:boolean};
 type DomainResult={correct:number;total:number};
 type Attempt={id:number;score:number;correct_answers:number;total_questions:number;elapsed_seconds:number;mode:'sprint'|'mock';domain:string;created_at:string;domain_breakdown?:Record<string,DomainResult>};
+type ReviewSummary={due_now:number;scheduled:number;mastered:number;next_review_at:string|null};
+type ReviewResult={question_id:number;correct:boolean};
+type LocalReviewRecord={question_id:number;miss_count:number;active:boolean;review_stage:number;next_review_at:string|null};
+type ReviewState={mistakes:Array<{question_id:number}>;schedule:ReviewSummary};
+const emptyReviewSummary:ReviewSummary={due_now:0,scheduled:0,mastered:0,next_review_at:null};
 const shuffle=<T,>(items:T[])=>[...items].sort(()=>Math.random()-.5);
 const fmtTime=(value:number)=>Math.floor(value/60)+':'+String(value%60).padStart(2,'0');
 const dateValue=(value:string)=>value.includes('T')?value:value.replace(' ','T')+'Z';
@@ -24,11 +29,43 @@ const createMockRound=()=>{
   const caseBlocks=caseIds.map(caseId=>questions.filter(q=>q.caseStudy?.id===caseId));
   return [...standard.slice(0,15),...caseBlocks[0],...standard.slice(15,34),...caseBlocks[1],...standard.slice(34)];
 };
-const loadLocalMistakes=()=>{
-  const ids=JSON.parse(localStorage.getItem('az104-mistakes')||'[]');
-  return Array.isArray(ids)?ids.filter((id):id is number=>Number.isInteger(id)&&questions.some(question=>question.id===id)):[];
+const loadLocalReviewRecords=():LocalReviewRecord[]=>{
+  const stored=JSON.parse(localStorage.getItem('az104-review-schedule')||'null');
+  if(Array.isArray(stored))return stored.filter((item):item is LocalReviewRecord=>item&&Number.isInteger(item.question_id)&&questions.some(question=>question.id===item.question_id)&&Number.isInteger(item.review_stage)&&item.review_stage>=0&&item.review_stage<=4);
+  const legacy=JSON.parse(localStorage.getItem('az104-mistakes')||'[]');
+  const records=Array.isArray(legacy)?legacy.filter((id):id is number=>Number.isInteger(id)&&questions.some(question=>question.id===id)).map(question_id=>({question_id,miss_count:1,active:true,review_stage:0,next_review_at:null})):[];
+  localStorage.setItem('az104-review-schedule',JSON.stringify(records));
+  return records;
 };
-const saveLocalMistakes=(ids:number[])=>localStorage.setItem('az104-mistakes',JSON.stringify(ids));
+const localReviewState=(records:LocalReviewRecord[]):ReviewState=>{
+  const now=Date.now();
+  const due=records.filter(item=>item.active||(item.review_stage>=1&&item.review_stage<=3&&item.next_review_at!==null&&new Date(item.next_review_at).getTime()<=now));
+  const scheduled=records.filter(item=>!item.active&&item.review_stage>=1&&item.review_stage<=3&&item.next_review_at!==null&&new Date(item.next_review_at).getTime()>now);
+  const nextReview=scheduled.map(item=>item.next_review_at as string).sort()[0]??null;
+  return {mistakes:due.map(item=>({question_id:item.question_id})),schedule:{due_now:due.length,scheduled:scheduled.length,mastered:records.filter(item=>item.review_stage===4).length,next_review_at:nextReview}};
+};
+const applyLocalReviewResults=(inputs:ReviewResult[]):ReviewState=>{
+  const records=loadLocalReviewRecords();
+  const now=Date.now();
+  for(const input of inputs){
+    const index=records.findIndex(item=>item.question_id===input.question_id);
+    const existing=index>=0?records[index]:null;
+    if(!input.correct){
+      const reset:LocalReviewRecord={question_id:input.question_id,miss_count:(existing?.miss_count??0)+1,active:true,review_stage:0,next_review_at:null};
+      if(index>=0)records[index]=reset;else records.push(reset);
+      continue;
+    }
+    if(!existing)continue;
+    const isDue=existing.active||(existing.next_review_at!==null&&new Date(existing.next_review_at).getTime()<=now);
+    if(!isDue)continue;
+    const nextStage=Math.min(4,existing.review_stage+1);
+    const delayDays=nextStage===1?1:nextStage===2?3:nextStage===3?7:0;
+    records[index]={...existing,active:false,review_stage:nextStage,next_review_at:delayDays?new Date(now+delayDays*86400000).toISOString():null};
+  }
+  localStorage.setItem('az104-review-schedule',JSON.stringify(records));
+  return localReviewState(records);
+};
+const fmtNextReview=(value:string|null)=>value?new Date(dateValue(value)).toLocaleDateString('en-GB',{day:'2-digit',month:'short'}):'—';
 const answerBreakdown=(items:Answer[])=>items.reduce<Record<string,DomainResult>>((results,answer)=>{
   results[answer.q.domain]??={correct:0,total:0};
   results[answer.q.domain].total++;
@@ -73,12 +110,13 @@ export default function Home(){
   const[historyStatus,setHistoryStatus]=useState<'loading'|'ready'|'local'|'error'>('loading');
   const[mistakeIds,setMistakeIds]=useState<number[]>([]);
   const[mistakeStatus,setMistakeStatus]=useState<'loading'|'ready'|'local'|'error'>('loading');
+  const[reviewSchedule,setReviewSchedule]=useState<ReviewSummary>(emptyReviewSummary);
   const[flagged,setFlagged]=useState<number[]>([]);
   const submittedRef=useRef(false);
   const current=round[index];
 
   useEffect(()=>{fetch('/api/scores').then(r=>r.ok?r.json():Promise.reject()).then(data=>{setHistory(data.attempts||[]);setHistoryStatus('ready')}).catch(()=>{try{setHistory(JSON.parse(localStorage.getItem('az104-history')||'[]'));setHistoryStatus('local')}catch{setHistoryStatus('error')}})},[]);
-  useEffect(()=>{fetch('/api/mistakes').then(r=>r.ok?r.json():Promise.reject()).then(data=>{setMistakeIds((data.mistakes||[]).map((item:{question_id:number})=>item.question_id));setMistakeStatus('ready')}).catch(()=>{try{setMistakeIds(loadLocalMistakes());setMistakeStatus('local')}catch{setMistakeStatus('error')}})},[]);
+  useEffect(()=>{fetch('/api/mistakes').then(r=>r.ok?r.json():Promise.reject()).then((data:ReviewState)=>{setMistakeIds((data.mistakes||[]).map(item=>item.question_id));setReviewSchedule(data.schedule??emptyReviewSummary);setMistakeStatus('ready')}).catch(()=>{try{const state=localReviewState(loadLocalReviewRecords());setMistakeIds(state.mistakes.map(item=>item.question_id));setReviewSchedule(state.schedule);setMistakeStatus('local')}catch{setMistakeStatus('error')}})},[]);
   useEffect(()=>{if(screen!=='quiz'&&screen!=='examReview')return;const timer=setInterval(()=>setSeconds(v=>v+1),1000);return()=>clearInterval(timer)},[screen]);
 
   const best=Math.max(0,...history.map(x=>x.score));
@@ -114,23 +152,18 @@ export default function Home(){
     if(!nextRound.length)return;
     submittedRef.current=false;setMode(nextMode);setDomain(nextDomain);setRound(nextRound);setIndex(0);setPicked(null);setAnswers([]);setFlagged([]);setStreak(0);setSeconds(0);setScreen('quiz');
   };
-  const trackMistake=(questionId:number,correct:boolean)=>{
-    setMistakeIds(items=>{
-      const next=correct?items.filter(id=>id!==questionId):[questionId,...items.filter(id=>id!==questionId)];
-      if(mistakeStatus!=='ready'){try{saveLocalMistakes(next)}catch{} }
-      return next;
-    });
-    if(mistakeStatus==='ready')void fetch('/api/mistakes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question_id:questionId,correct})}).then(response=>{if(!response.ok)throw new Error()}).catch(()=>{setMistakeStatus('local');setMistakeIds(items=>{try{saveLocalMistakes(items)}catch{setMistakeStatus('error')}return items})});
+  const applyReviewState=(state:ReviewState)=>{setMistakeIds((state.mistakes||[]).map(item=>item.question_id));setReviewSchedule(state.schedule??emptyReviewSummary)};
+  const syncReviewResults=(results:ReviewResult[])=>{
+    setMistakeIds(items=>results.reduce((ids,result)=>result.correct?ids.filter(id=>id!==result.question_id):[result.question_id,...ids.filter(id=>id!==result.question_id)],items));
+    if(mistakeStatus!=='ready'){
+      try{applyReviewState(applyLocalReviewResults(results));setMistakeStatus('local')}catch{setMistakeStatus('error')}
+      return;
+    }
+    const body=results.length===1?results[0]:{answers:results};
+    void fetch('/api/mistakes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(response=>response.ok?response.json():Promise.reject()).then((state:ReviewState)=>applyReviewState(state)).catch(()=>{try{applyReviewState(applyLocalReviewResults(results));setMistakeStatus('local')}catch{setMistakeStatus('error')}});
   };
-  const trackExamMistakes=(examAnswers:Answer[])=>{
-    const results=examAnswers.map(answer=>({question_id:answer.q.id,correct:answer.ok}));
-    setMistakeIds(items=>{
-      const next=results.reduce((ids,result)=>result.correct?ids.filter(id=>id!==result.question_id):[result.question_id,...ids.filter(id=>id!==result.question_id)],items);
-      if(mistakeStatus!=='ready'){try{saveLocalMistakes(next)}catch{} }
-      return next;
-    });
-    if(mistakeStatus==='ready')void fetch('/api/mistakes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({answers:results})}).then(response=>{if(!response.ok)throw new Error()}).catch(()=>{setMistakeStatus('local');setMistakeIds(items=>{try{saveLocalMistakes(items)}catch{setMistakeStatus('error')}return items})});
-  };
+  const trackMistake=(questionId:number,correct:boolean)=>syncReviewResults([{question_id:questionId,correct}]);
+  const trackExamMistakes=(examAnswers:Answer[])=>syncReviewResults(examAnswers.map(answer=>({question_id:answer.q.id,correct:answer.ok})));
   const choose=(choice:number)=>{
     if(picked!==null&&mode!=='mock')return;
     const nextAnswer={q:current,pick:choice,ok:choice===current.answer};
@@ -168,10 +201,11 @@ export default function Home(){
 
     {screen==='home'&&<section className="home">
       <div className="hero"><p className="kicker">AZURE ADMINISTRATOR // COMPLETE BLUEPRINT</p><h1>Train to <em>800.</em><br/>Pass with confidence.</h1><p className="lede">{questions.length} original questions across every objective in Microsoft’s current AZ-104 outline—from Entra and storage to compute, networking, monitoring, backup, and recovery.</p><div className="target"><b>800<small>TARGET</small></b><span><strong>Your safety margin</strong><p>Microsoft requires 700. Aim higher so exam-day nerves have room to breathe.</p></span></div></div>
-      <div className="card"><p className="kicker">CHOOSE A TRAINING MODE</p><div className="modes"><button className={mode==='sprint'?'sel':''} onClick={()=>setMode('sprint')}><b>10</b><span>Quick sprint<small>Instant teaching feedback</small></span></button><button className={mode==='mock'?'sel':''} onClick={()=>{setMode('mock');setDomain(domains[0])}}><b>50</b><span>Exam simulator<small>100 min · case studies · flags</small></span></button><button className={mode==='review'?'sel':''} disabled={!mistakeIds.length||mistakeStatus==='loading'} onClick={()=>{setMode('review');setDomain(domains[0])}}><b>{mistakeStatus==='loading'?'…':mistakeIds.length}</b><span>Review mistakes<small>{mistakeIds.length?'Clear remembered misses':'No mistakes waiting'}</small></span></button></div>
+      <div className="card"><p className="kicker">CHOOSE A TRAINING MODE</p><div className="modes"><button className={mode==='sprint'?'sel':''} onClick={()=>setMode('sprint')}><b>10</b><span>Quick sprint<small>Instant teaching feedback</small></span></button><button className={mode==='mock'?'sel':''} onClick={()=>{setMode('mock');setDomain(domains[0])}}><b>50</b><span>Exam simulator<small>100 min · case studies · flags</small></span></button><button className={mode==='review'?'sel':''} disabled={!mistakeIds.length||mistakeStatus==='loading'} onClick={()=>{setMode('review');setDomain(domains[0])}}><b>{mistakeStatus==='loading'?'…':mistakeIds.length}</b><span>Review due<small>{mistakeIds.length?'Repair today’s weak spots':reviewSchedule.scheduled?`${reviewSchedule.scheduled} scheduled for later`:'No reviews waiting'}</small></span></button></div>
+        <div className="review-schedule"><div><small>DUE NOW</small><strong>{mistakeStatus==='loading'?'—':reviewSchedule.due_now}</strong></div><div><small>SCHEDULED</small><strong>{mistakeStatus==='loading'?'—':reviewSchedule.scheduled}</strong></div><div><small>MASTERED</small><strong>{mistakeStatus==='loading'?'—':reviewSchedule.mastered}</strong></div><div><small>NEXT REVIEW</small><strong>{mistakeStatus==='loading'?'—':reviewSchedule.due_now?'Now':fmtNextReview(reviewSchedule.next_review_at)}</strong></div></div>
         {mode==='sprint'&&<><h2>Choose your focus</h2><div className="domains">{domains.map(item=><button className={domain===item?'sel':''} onClick={()=>setDomain(item)} key={item}>{item===domains[0]?'⚡ Mixed review':item}<small>{item===domains[0]?questions.length+' questions total':questions.filter(q=>q.domain===item).length+' questions'}</small></button>)}</div></>}
         {mode==='mock'&&<div className="mock-note"><span>EXAM-DAY SIMULATION</span><strong>50 questions with two case-study sets</strong><p>Navigate freely, change answers, flag questions, and review unanswered items. Results stay hidden until final submission.</p></div>}
-        {mode==='review'&&<div className="mock-note mistake-note"><span>MEMORY REPAIR</span><strong>{mistakeIds.length} question{mistakeIds.length===1?'':'s'} waiting for review</strong><p>Answer one correctly to remove it. Miss it again and it stays in your queue.</p></div>}
+        {mode==='review'&&<div className="mock-note mistake-note"><span>SPACED MEMORY REPAIR</span><strong>{mistakeIds.length} question{mistakeIds.length===1?'':'s'} due now</strong><p>A correct review returns after 1 day, then 3 days, then 7 days. Miss it again and the cycle restarts.</p></div>}
         <button className="primary" disabled={mistakeStatus==='loading'} onClick={()=>start()}>{mistakeStatus==='loading'?'Loading review history…':mode==='mock'?'Start exam simulator':mode==='review'?`Review ${Math.min(10,mistakeIds.length)} mistake${Math.min(10,mistakeIds.length)===1?'':'s'}`:'Start 10-question sprint'} <span>→</span></button><small className="fine">{historyStatus==='local'||mistakeStatus==='local'?'Your scores and missed questions stay in this browser on this device.':'Your scores and missed questions are saved privately to this site.'}</small>
       </div>
       <div className="blueprint"><p>2026 EXAM BLUEPRINT</p>{[['Identity & governance','20–25%'],['Compute','20–25%'],['Storage','15–20%'],['Networking','15–20%'],['Monitoring & recovery','10–15%']].map(item=><div key={item[0]}><span>{item[0]}</span><i/><b>{item[1]}</b></div>)}</div>
@@ -207,11 +241,11 @@ export default function Home(){
 
     {screen==='quiz'&&current&&<section className="quiz"><aside><button onClick={goHome}>← Exit {mode==='mock'?'exam':mode==='review'?'review':'sprint'}</button><p>{mode==='mock'?'EXAM SIMULATOR':mode==='review'?'REVIEW SET':'QUESTION'}</p><strong>{String(index+1).padStart(2,'0')} <small>/ {String(round.length).padStart(2,'0')}</small></strong><div className="progress"><i style={{width:(mode==='mock'?answers.length:(index+(picked!==null?1:0)))/round.length*100+'%'}}/></div><dl><div><dt>{mode==='mock'?'Answered':'Score'}</dt><dd>{mode==='mock'?answers.length:right+'/'+answers.length}</dd></div><div><dt>{mode==='mock'?'Flagged':'Streak'}</dt><dd>{mode==='mock'?flagged.length:'×'+streak}</dd></div><div><dt>{mode==='mock'?'Remaining':'Time'}</dt><dd>{mode==='mock'?fmtTime(Math.max(0,6000-seconds)):fmtTime(seconds)}</dd></div></dl>{mode==='mock'&&<><small className="hidden-note">ANSWERS HIDDEN UNTIL RESULTS</small><div className="exam-tools"><span>QUESTION NAVIGATOR</span><div className="exam-grid">{round.map((question,questionIndex)=>{const classes=[questionIndex===index?'current':'',answeredIds.has(question.id)?'answered':'',flagged.includes(question.id)?'flagged':''].filter(Boolean).join(' ');return <button key={question.id} className={classes} onClick={()=>goQuestion(questionIndex)} aria-label={`Open question ${questionIndex+1}`}>{questionIndex+1}{flagged.includes(question.id)&&<i>⚑</i>}</button>})}</div><button className="review-exam-btn" onClick={()=>setScreen('examReview')}>Review & submit</button></div></>}</aside>
       <article className="qcard"><div className="qtop"><span>{current.domain}</span><small>{current.objective.toUpperCase()}</small></div>{current.caseStudy&&<section className="case-study"><span>CASE STUDY</span><h3>{current.caseStudy.title}</h3><p>{current.caseStudy.context}</p><strong>Requirements</strong><ul>{current.caseStudy.requirements.map(requirement=><li key={requirement}>{requirement}</li>)}</ul></section>}<h2>{current.prompt}</h2><div className="options">{current.options.map((option,i)=>{const state=picked===null?'':mode==='mock'?(i===picked?'selected':'dim'):i===current.answer?'correct':i===picked?'wrong':'dim';return <button key={option} className={state} onClick={()=>choose(i)}><b>{String.fromCharCode(65+i)}</b>{option}{mode!=='mock'&&picked!==null&&i===current.answer&&<i>✓</i>}{mode!=='mock'&&picked===i&&i!==current.answer&&<i>×</i>}</button>})}</div>
-        {picked!==null&&mode!=='mock'&&<div className={'feedback '+(picked===current.answer?'good':'bad')}><strong>{picked===current.answer?(mode==='review'?'Correct — removed from your mistake queue.':'Correct — lock it in.'):'Not quite — this stays in your mistake queue.'}</strong><p>{current.explanation}</p><button onClick={next}>{index===round.length-1?'See my score':'Next question'} →</button></div>}
+        {picked!==null&&mode!=='mock'&&<div className={'feedback '+(picked===current.answer?'good':'bad')}><strong>{picked===current.answer?(mode==='review'?'Correct — the next review is scheduled.':'Correct — lock it in.'):'Not quite — this stays in your review queue.'}</strong><p>{current.explanation}</p><button onClick={next}>{index===round.length-1?'See my score':'Next question'} →</button></div>}
         {mode==='mock'&&<div className="mock-next exam-controls"><button onClick={()=>goQuestion(index-1)} disabled={index===0}>← Previous</button><button className={flagged.includes(current.id)?'flag-active':''} onClick={toggleFlag}>{flagged.includes(current.id)?'⚑ Flagged':'⚐ Flag for review'}</button><button onClick={next}>{index===round.length-1?'Review & submit':'Next question'} →</button></div>}
       </article></section>}
 
-    {screen==='result'&&<section className="result"><p className="kicker">{mode==='mock'?'EXAM SIMULATOR COMPLETE':mode==='review'?'REVIEW COMPLETE':'SPRINT COMPLETE'}</p><div className={'score '+(score>=800?'pass':'')}><b>{score}</b><small>/ 1000</small></div><h1>{mode==='review'&&!mistakeIds.length?'Mistake queue cleared.':score>=800?'You hit the target.':'One more focused lap.'}</h1><p>{right} of {round.length} correct in {fmtTime(seconds)}. {mode==='review'?`${mistakeIds.length} remembered mistake${mistakeIds.length===1?'':'s'} remaining.`:score>=800?'Keep repeating until 800 feels routine.':'Review the misses, then attack your weakest area.'}</p><div className="saved-badge">{historyStatus==='error'?'△ Score could not be saved':historyStatus==='local'?'✓ Score saved on this device':'✓ Score saved to your history'}</div><div className="actions">{mode==='review'&&!mistakeIds.length?<button className="primary" onClick={goHome}>All cleared ✓</button>:<button className="primary" onClick={()=>start()}>Retry {mode==='mock'?'exam':mode==='review'?'mistakes':'focus'} →</button>}<button onClick={()=>setScreen('progress')}>View progress</button><button onClick={goHome}>Change mode</button></div>{weak&&<div className="weak"><small>WEAKEST AREA</small><strong>{weak}</strong><button onClick={()=>start('sprint',weak)}>Drill this next →</button></div>}<div className="review"><h2>Review your answers</h2>{answers.map((answer,i)=><div key={answer.q.id}><b className={answer.ok?'yes':'no'}>{answer.ok?'✓':'×'}</b><span><small>Q{i+1} · {answer.q.domain} · {answer.q.objective}{answer.pick===-1?' · Unanswered':''}</small>{answer.q.prompt}{!answer.ok&&<em>Correct: {answer.q.options[answer.q.answer]}. {answer.q.explanation}</em>}</span></div>)}</div></section>}
+    {screen==='result'&&<section className="result"><p className="kicker">{mode==='mock'?'EXAM SIMULATOR COMPLETE':mode==='review'?'REVIEW COMPLETE':'SPRINT COMPLETE'}</p><div className={'score '+(score>=800?'pass':'')}><b>{score}</b><small>/ 1000</small></div><h1>{mode==='review'&&!mistakeIds.length?(reviewSchedule.scheduled?'Next review scheduled.':'Mistake queue cleared.'):score>=800?'You hit the target.':'One more focused lap.'}</h1><p>{right} of {round.length} correct in {fmtTime(seconds)}. {mode==='review'?`${reviewSchedule.due_now} due now · ${reviewSchedule.scheduled} scheduled · ${reviewSchedule.mastered} mastered.`:score>=800?'Keep repeating until 800 feels routine.':'Review the misses, then attack your weakest area.'}</p><div className="saved-badge">{historyStatus==='error'?'△ Score could not be saved':historyStatus==='local'?'✓ Score saved on this device':'✓ Score saved to your history'}</div><div className="actions">{mode==='review'&&!mistakeIds.length?<button className="primary" onClick={goHome}>{reviewSchedule.scheduled?'Return on '+fmtNextReview(reviewSchedule.next_review_at):'All cleared ✓'}</button>:<button className="primary" onClick={()=>start()}>Retry {mode==='mock'?'exam':mode==='review'?'reviews':'focus'} →</button>}<button onClick={()=>setScreen('progress')}>View progress</button><button onClick={goHome}>Change mode</button></div>{weak&&<div className="weak"><small>WEAKEST AREA</small><strong>{weak}</strong><button onClick={()=>start('sprint',weak)}>Drill this next →</button></div>}<div className="review"><h2>Review your answers</h2>{answers.map((answer,i)=><div key={answer.q.id}><b className={answer.ok?'yes':'no'}>{answer.ok?'✓':'×'}</b><span><small>Q{i+1} · {answer.q.domain} · {answer.q.objective}{answer.pick===-1?' · Unanswered':''}</small>{answer.q.prompt}{!answer.ok&&<em>Correct: {answer.q.options[answer.q.answer]}. {answer.q.explanation}</em>}</span></div>)}</div></section>}
     <footer>Independent study aid · Original questions aligned to Microsoft’s AZ-104 skills outline · Updated August 2026</footer>
   </main>
 }

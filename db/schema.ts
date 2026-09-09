@@ -33,9 +33,16 @@ CREATE TABLE IF NOT EXISTS question_mistakes (
   question_id INTEGER PRIMARY KEY,
   miss_count INTEGER NOT NULL DEFAULT 1 CHECK(miss_count > 0),
   active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0, 1)),
-  last_missed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  last_missed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  review_stage INTEGER NOT NULL DEFAULT 0 CHECK(review_stage BETWEEN 0 AND 4),
+  next_review_at TEXT,
+  mastered_at TEXT
 )`;
 
 export const questionMistakesIndex = `
 CREATE INDEX IF NOT EXISTS idx_question_mistakes_active_last_missed
 ON question_mistakes(active, last_missed_at DESC)`;
+
+export const questionReviewDueIndex = `
+CREATE INDEX IF NOT EXISTS idx_question_mistakes_review_due
+ON question_mistakes(active, review_stage, next_review_at)`;
