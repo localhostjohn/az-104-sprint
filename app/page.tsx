@@ -13,6 +13,24 @@ type LocalReviewRecord={question_id:number;miss_count:number;active:boolean;revi
 type ReviewState={mistakes:Array<{question_id:number}>;schedule:ReviewSummary};
 const emptyReviewSummary:ReviewSummary={due_now:0,scheduled:0,mastered:0,next_review_at:null};
 const shuffle=<T,>(items:T[])=>[...items].sort(()=>Math.random()-.5);
+const createSprintRound=(source:Question[],focus:string)=>{
+  const key='az104-seen-'+(focus===domains[0]?'mixed':focus);
+  try{
+    const saved=JSON.parse(localStorage.getItem(key)||'[]');
+    const valid=new Set(source.map(question=>question.id));
+    const seen=new Set<number>(Array.isArray(saved)?saved.filter((id):id is number=>Number.isInteger(id)&&valid.has(id)):[]);
+    // Start a new cycle once every question in this focus has appeared.
+    if(seen.size===source.length)seen.clear();
+    const fresh=shuffle(source.filter(question=>!seen.has(question.id)));
+    const previous=shuffle(source.filter(question=>seen.has(question.id)));
+    const selected=[...fresh,...previous].slice(0,10);
+    selected.forEach(question=>seen.add(question.id));
+    localStorage.setItem(key,JSON.stringify([...seen]));
+    return selected;
+  }catch{
+    return shuffle(source).slice(0,10);
+  }
+};
 const fmtTime=(value:number)=>Math.floor(value/60)+':'+String(value%60).padStart(2,'0');
 const dateValue=(value:string)=>value.includes('T')?value:value.replace(' ','T')+'Z';
 const fmtDate=(value:string)=>new Date(dateValue(value)).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
@@ -115,8 +133,8 @@ export default function Home(){
   const submittedRef=useRef(false);
   const current=round[index];
 
-  useEffect(()=>{fetch('/api/scores').then(r=>r.ok?r.json():Promise.reject()).then(data=>{setHistory(data.attempts||[]);setHistoryStatus('ready')}).catch(()=>{try{setHistory(JSON.parse(localStorage.getItem('az104-history')||'[]'));setHistoryStatus('local')}catch{setHistoryStatus('error')}})},[]);
-  useEffect(()=>{fetch('/api/mistakes').then(r=>r.ok?r.json():Promise.reject()).then((data:ReviewState)=>{setMistakeIds((data.mistakes||[]).map(item=>item.question_id));setReviewSchedule(data.schedule??emptyReviewSummary);setMistakeStatus('ready')}).catch(()=>{try{const state=localReviewState(loadLocalReviewRecords());setMistakeIds(state.mistakes.map(item=>item.question_id));setReviewSchedule(state.schedule);setMistakeStatus('local')}catch{setMistakeStatus('error')}})},[]);
+  useEffect(()=>{fetch('/api/scores').then(r=>r.ok?r.json() as Promise<{attempts:Attempt[]}>:Promise.reject()).then(data=>{setHistory(data.attempts||[]);setHistoryStatus('ready')}).catch(()=>{try{setHistory(JSON.parse(localStorage.getItem('az104-history')||'[]'));setHistoryStatus('local')}catch{setHistoryStatus('error')}})},[]);
+  useEffect(()=>{fetch('/api/mistakes').then(r=>r.ok?r.json() as Promise<ReviewState>:Promise.reject()).then(data=>{setMistakeIds((data.mistakes||[]).map(item=>item.question_id));setReviewSchedule(data.schedule??emptyReviewSummary);setMistakeStatus('ready')}).catch(()=>{try{const state=localReviewState(loadLocalReviewRecords());setMistakeIds(state.mistakes.map(item=>item.question_id));setReviewSchedule(state.schedule);setMistakeStatus('local')}catch{setMistakeStatus('error')}})},[]);
   useEffect(()=>{if(screen!=='quiz'&&screen!=='examReview')return;const timer=setInterval(()=>setSeconds(v=>v+1),1000);return()=>clearInterval(timer)},[screen]);
 
   const best=Math.max(0,...history.map(x=>x.score));
@@ -133,12 +151,12 @@ export default function Home(){
   const examReady=threeExamBaseline&&recentExams.every(attempt=>attempt.score>=800)&&recentDomainFloor>=70;
   const nearlyReady=threeExamBaseline&&recentExamAverage>=750&&recentDomainFloor>=60;
   const readiness=examReady
-    ?{label:'READY TO BOOK',title:'Three strong exams in a row',detail:'You scored 800+ on all three recent full simulations, with every domain at 70% or better.',tone:'ready'}
+    ?{label:'PRACTICE TARGET MET',title:'Three strong practice exams',detail:'You scored 800+ on all three recent simulations, with every domain at 70% or better. Confirm with Microsoft’s practice assessment and hands-on labs.',tone:'ready'}
     :nearlyReady
       ?{label:'NEARLY READY',title:'Close—repair the weakest domain',detail:`Your last three full exams average ${recentExamAverage}. Push every domain above 70%, then repeat 800+.`,tone:'near'}
       :threeExamBaseline
         ?{label:'BUILDING',title:'More exam reps needed',detail:`Your last three full exams average ${recentExamAverage}. Drill ${weakestRecentDomain?.name??'your weakest area'}, then retest.`,tone:'building'}
-        :{label:'BASELINE NEEDED',title:`Complete ${3-recentExams.length} more full exam${3-recentExams.length===1?'':'s'}`,detail:'Readiness is based on three recent 50-question simulations, not quick sprints.',tone:'baseline'};
+        :{label:'BASELINE NEEDED',title:`Complete ${3-recentExams.length} more full exam${3-recentExams.length===1?'':'s'}`,detail:'This practice trend uses three recent 50-question simulations. It cannot predict an official exam score.',tone:'baseline'};
   const right=answers.filter(x=>x.ok).length;
   const score=Math.round(right/Math.max(round.length,1)*1000);
   const answeredIds=useMemo(()=>new Set(answers.map(answer=>answer.q.id)),[answers]);
@@ -148,7 +166,7 @@ export default function Home(){
 
   const start=(nextMode:Mode=mode,nextDomain:string=domain)=>{
     const source=questions.filter(item=>nextDomain===domains[0]||item.domain===nextDomain);
-    const nextRound=nextMode==='mock'?createMockRound():nextMode==='review'?shuffle(mistakeQuestions).slice(0,10):shuffle(source).slice(0,10);
+    const nextRound=nextMode==='mock'?createMockRound():nextMode==='review'?shuffle(mistakeQuestions).slice(0,10):createSprintRound(source,nextDomain);
     if(!nextRound.length)return;
     submittedRef.current=false;setMode(nextMode);setDomain(nextDomain);setRound(nextRound);setIndex(0);setPicked(null);setAnswers([]);setFlagged([]);setStreak(0);setSeconds(0);setScreen('quiz');
   };
@@ -160,7 +178,7 @@ export default function Home(){
       return;
     }
     const body=results.length===1?results[0]:{answers:results};
-    void fetch('/api/mistakes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(response=>response.ok?response.json():Promise.reject()).then((state:ReviewState)=>applyReviewState(state)).catch(()=>{try{applyReviewState(applyLocalReviewResults(results));setMistakeStatus('local')}catch{setMistakeStatus('error')}});
+    void fetch('/api/mistakes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(response=>response.ok?response.json() as Promise<ReviewState>:Promise.reject()).then(state=>applyReviewState(state)).catch(()=>{try{applyReviewState(applyLocalReviewResults(results));setMistakeStatus('local')}catch{setMistakeStatus('error')}});
   };
   const trackMistake=(questionId:number,correct:boolean)=>syncReviewResults([{question_id:questionId,correct}]);
   const trackExamMistakes=(examAnswers:Answer[])=>syncReviewResults(examAnswers.map(answer=>({question_id:answer.q.id,correct:answer.ok})));
@@ -177,7 +195,7 @@ export default function Home(){
     const domain_breakdown=answerBreakdown(answerItems);
     const optimistic:Attempt={id:-Date.now(),score:finalScore,correct_answers:correct,total_questions:round.length,elapsed_seconds:seconds,mode:storedMode,domain:storedDomain,created_at:new Date().toISOString(),domain_breakdown};
     setHistory(items=>[optimistic,...items]);
-    try{const response=await fetch('/api/scores',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({score:finalScore,correct_answers:correct,total_questions:round.length,elapsed_seconds:seconds,mode:storedMode,domain:storedDomain,domain_breakdown})});if(!response.ok)throw new Error();const data=await response.json();setHistory(items=>items.map(item=>item.id===optimistic.id?data.attempt:item));setHistoryStatus('ready')}catch{setHistory(items=>{try{localStorage.setItem('az104-history',JSON.stringify(items));setHistoryStatus('local')}catch{setHistoryStatus('error')}return items})}
+    try{const response=await fetch('/api/scores',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({score:finalScore,correct_answers:correct,total_questions:round.length,elapsed_seconds:seconds,mode:storedMode,domain:storedDomain,domain_breakdown})});if(!response.ok)throw new Error();const data=await response.json() as {attempt:Attempt};setHistory(items=>items.map(item=>item.id===optimistic.id?data.attempt:item));setHistoryStatus('ready')}catch{setHistory(items=>{try{localStorage.setItem('az104-history',JSON.stringify(items));setHistoryStatus('local')}catch{setHistoryStatus('error')}return items})}
   };
   const goQuestion=(targetIndex:number)=>{const target=round[targetIndex];if(!target)return;setIndex(targetIndex);setPicked(answers.find(answer=>answer.q.id===target.id)?.pick??null);setScreen('quiz')};
   const toggleFlag=()=>setFlagged(items=>items.includes(current.id)?items.filter(id=>id!==current.id):[...items,current.id]);
@@ -200,8 +218,8 @@ export default function Home(){
     <header className="top"><button className="logo" onClick={goHome}><span>AZ</span><strong>104 SPRINT</strong></button><nav className="nav"><button className={screen==='home'?'active':''} onClick={goHome}>Practice</button><button className={screen==='progress'?'active':''} onClick={()=>setScreen('progress')}>Progress <b>{history.length}</b></button><button className={screen==='resources'?'active':''} onClick={()=>setScreen('resources')}>Learn</button></nav></header>
 
     {screen==='home'&&<section className="home">
-      <div className="hero"><p className="kicker">AZURE ADMINISTRATOR // COMPLETE BLUEPRINT</p><h1>Train to <em>800.</em><br/>Pass with confidence.</h1><p className="lede">{questions.length} original questions across every objective in Microsoft’s current AZ-104 outline—from Entra and storage to compute, networking, monitoring, backup, and recovery.</p><div className="target"><b>800<small>TARGET</small></b><span><strong>Your safety margin</strong><p>Microsoft requires 700. Aim higher so exam-day nerves have room to breathe.</p></span></div></div>
-      <div className="card"><p className="kicker">CHOOSE A TRAINING MODE</p><div className="modes"><button className={mode==='sprint'?'sel':''} onClick={()=>setMode('sprint')}><b>10</b><span>Quick sprint<small>Instant teaching feedback</small></span></button><button className={mode==='mock'?'sel':''} onClick={()=>{setMode('mock');setDomain(domains[0])}}><b>50</b><span>Exam simulator<small>100 min · case studies · flags</small></span></button><button className={mode==='review'?'sel':''} disabled={!mistakeIds.length||mistakeStatus==='loading'} onClick={()=>{setMode('review');setDomain(domains[0])}}><b>{mistakeStatus==='loading'?'…':mistakeIds.length}</b><span>Review due<small>{mistakeIds.length?'Repair today’s weak spots':reviewSchedule.scheduled?`${reviewSchedule.scheduled} scheduled for later`:'No reviews waiting'}</small></span></button></div>
+      <div className="hero"><p className="kicker">AZURE ADMINISTRATOR // PRACTICE BLUEPRINT</p><h1>Train to <em>800.</em><br/>Build your confidence.</h1><p className="lede">{questions.length} original questions across the AZ-104 domains—from Entra and storage to compute, networking, monitoring, backup, and recovery.</p><div className="target"><b>800<small>PRACTICE TARGET</small></b><span><strong>Your training benchmark</strong><p>This app scales your percentage correct to 1,000. Official exam scoring works differently, so 800 here is a study goal, not a predicted exam score.</p></span></div></div>
+      <div className="card"><p className="kicker">CHOOSE A TRAINING MODE</p><div className="modes"><button className={mode==='sprint'?'sel':''} onClick={()=>setMode('sprint')}><b>10</b><span>Quick sprint<small>Unseen first · instant feedback</small></span></button><button className={mode==='mock'?'sel':''} onClick={()=>{setMode('mock');setDomain(domains[0])}}><b>50</b><span>Exam simulator<small>100 min · case studies · flags</small></span></button><button className={mode==='review'?'sel':''} disabled={!mistakeIds.length||mistakeStatus==='loading'} onClick={()=>{setMode('review');setDomain(domains[0])}}><b>{mistakeStatus==='loading'?'…':mistakeIds.length}</b><span>Review due<small>{mistakeIds.length?'Repair today’s weak spots':reviewSchedule.scheduled?`${reviewSchedule.scheduled} scheduled for later`:'No reviews waiting'}</small></span></button></div>
         <div className="review-schedule"><div><small>DUE NOW</small><strong>{mistakeStatus==='loading'?'—':reviewSchedule.due_now}</strong></div><div><small>SCHEDULED</small><strong>{mistakeStatus==='loading'?'—':reviewSchedule.scheduled}</strong></div><div><small>MASTERED</small><strong>{mistakeStatus==='loading'?'—':reviewSchedule.mastered}</strong></div><div><small>NEXT REVIEW</small><strong>{mistakeStatus==='loading'?'—':reviewSchedule.due_now?'Now':fmtNextReview(reviewSchedule.next_review_at)}</strong></div></div>
         {mode==='sprint'&&<><h2>Choose your focus</h2><div className="domains">{domains.map(item=><button className={domain===item?'sel':''} onClick={()=>setDomain(item)} key={item}>{item===domains[0]?'⚡ Mixed review':item}<small>{item===domains[0]?questions.length+' questions total':questions.filter(q=>q.domain===item).length+' questions'}</small></button>)}</div></>}
         {mode==='mock'&&<div className="mock-note"><span>EXAM-DAY SIMULATION</span><strong>50 questions with two case-study sets</strong><p>Navigate freely, change answers, flag questions, and review unanswered items. Results stay hidden until final submission.</p></div>}
@@ -212,7 +230,7 @@ export default function Home(){
     </section>}
 
     {screen==='progress'&&<section className="progress-page">
-      <div className="progress-head"><div><p className="kicker">YOUR SCORE HISTORY</p><h1>Are you ready for 800?</h1><p>Every completed sprint and exam simulation contributes to your trend.</p></div><button className="primary" onClick={goHome}>Train now →</button></div>
+      <div className="progress-head"><div><p className="kicker">YOUR SCORE HISTORY</p><h1>Track your practice target.</h1><p>Every completed sprint and exam simulation contributes to your trend. Scores here are study scores, not official exam scores.</p></div><button className="primary" onClick={goHome}>Train now →</button></div>
       <div className="stat-grid"><article><small>PERSONAL BEST</small><strong>{best||'—'}</strong><span>/ 1000</span></article><article><small>AVERAGE SCORE</small><strong>{average||'—'}</strong><span>{history.length?'all attempts':'no attempts'}</span></article><article><small>COMPLETED</small><strong>{history.length}</strong><span>attempts</span></article><article><small>800+ SCORES</small><strong>{targetHits}</strong><span>{history.length?Math.round(targetHits/history.length*100)+'% hit rate':'target passes'}</span></article></div>
       <div className="progress-grid"><article className="trend-card"><div className="panel-title"><div><h2>Recent trend</h2><p>Last 12 completed attempts</p></div><span className={average>=800?'ready':'building'}>{average>=800?'ON TARGET':'BUILDING'}</span></div>
         {history.length?<div className="chart"><div className="target-line"><span>800</span></div>{[...history].slice(0,12).reverse().map(item=><div className="bar-wrap" key={item.id}><b>{item.score}</b><i className={item.score>=800?'hit':''} style={{height:Math.max(8,item.score/10)+'%'}}/><small>{new Date(dateValue(item.created_at)).toLocaleDateString('en-GB',{day:'2-digit',month:'short'})}</small></div>)}</div>:<div className="empty-state"><b>⌁</b><h3>Your trend starts after one completed round.</h3><button onClick={goHome}>Take a sprint</button></div>}
@@ -246,6 +264,6 @@ export default function Home(){
       </article></section>}
 
     {screen==='result'&&<section className="result"><p className="kicker">{mode==='mock'?'EXAM SIMULATOR COMPLETE':mode==='review'?'REVIEW COMPLETE':'SPRINT COMPLETE'}</p><div className={'score '+(score>=800?'pass':'')}><b>{score}</b><small>/ 1000</small></div><h1>{mode==='review'&&!mistakeIds.length?(reviewSchedule.scheduled?'Next review scheduled.':'Mistake queue cleared.'):score>=800?'You hit the target.':'One more focused lap.'}</h1><p>{right} of {round.length} correct in {fmtTime(seconds)}. {mode==='review'?`${reviewSchedule.due_now} due now · ${reviewSchedule.scheduled} scheduled · ${reviewSchedule.mastered} mastered.`:score>=800?'Keep repeating until 800 feels routine.':'Review the misses, then attack your weakest area.'}</p><div className="saved-badge">{historyStatus==='error'?'△ Score could not be saved':historyStatus==='local'?'✓ Score saved on this device':'✓ Score saved to your history'}</div><div className="actions">{mode==='review'&&!mistakeIds.length?<button className="primary" onClick={goHome}>{reviewSchedule.scheduled?'Return on '+fmtNextReview(reviewSchedule.next_review_at):'All cleared ✓'}</button>:<button className="primary" onClick={()=>start()}>Retry {mode==='mock'?'exam':mode==='review'?'reviews':'focus'} →</button>}<button onClick={()=>setScreen('progress')}>View progress</button><button onClick={goHome}>Change mode</button></div>{weak&&<div className="weak"><small>WEAKEST AREA</small><strong>{weak}</strong><button onClick={()=>start('sprint',weak)}>Drill this next →</button></div>}<div className="review"><h2>Review your answers</h2>{answers.map((answer,i)=><div key={answer.q.id}><b className={answer.ok?'yes':'no'}>{answer.ok?'✓':'×'}</b><span><small>Q{i+1} · {answer.q.domain} · {answer.q.objective}{answer.pick===-1?' · Unanswered':''}</small>{answer.q.prompt}{!answer.ok&&<em>Correct: {answer.q.options[answer.q.answer]}. {answer.q.explanation}</em>}</span></div>)}</div></section>}
-    <footer>Independent study aid · Original questions aligned to Microsoft’s AZ-104 skills outline · Updated August 2026</footer>
+    <footer>Independent study aid · Original AZ-104 practice questions · Updated September 2026</footer>
   </main>
 }

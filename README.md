@@ -8,10 +8,13 @@ The application combines short teaching sessions, mock exams and score tracking 
 
 ## Features
 
-- 80 original questions covering the objectives in the April 2026 AZ-104 skills outline.
-- 10-question teaching sprints with instant explanations.
+- 89 original questions covering the AZ-104 domains.
+- 10-question teaching sprints with instant explanations and unseen questions first within each selected focus on the current device.
 - Weighted 50-question mock exams with a 100-minute target.
-- Score history, average, personal best and 800+ readiness tracking.
+- Spaced review of missed questions, scheduled after 1, 3 and 7 days of correct reviews.
+- Score history, average, personal best and a three-exam practice trend.
+
+Scores in this app are the percentage correct scaled to 1,000. The 800 practice target is a study benchmark and does not predict Microsoft's scaled exam result. Use the current Microsoft study guide, its practice assessment and hands-on labs alongside the app.
 
 ## Run locally
 
