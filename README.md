@@ -9,8 +9,8 @@ The application combines short teaching sessions, mock exams and score tracking 
 ## Features
 
 - 109 original questions, including 20 new scenario questions, across the April 2026 AZ-104 skills outline.
-- 10-question teaching sprints with instant explanations and shuffled answer choices.
-- Weighted 50-question mock exams with a 100-minute target.
+- 10-question teaching sprints with instant explanations, shuffled answer choices and least-seen question selection.
+- Weighted 50-question mock exams with a 100-minute target, favouring questions seen least often on this device.
 - Score history, average, personal best and a practice trend based on recent mocks.
 - A Study next screen that combines due reviews, the weakest domain, and a personal-lab task.
 - Practice results are shown as percentages, not estimates of Microsoft's scaled exam score.
@@ -19,6 +19,8 @@ The application combines short teaching sessions, mock exams and score tracking 
 ## How to use it for exam preparation
 
 Finish a QA course topic, take a focused sprint, then practise the configuration in a personal Azure lab. Review missed questions on schedule. Use the 50-question mocks to find weak domains, and validate your progress with unfamiliar questions and Microsoft's Practice Assessment before booking. Repeated questions in this small bank can inflate accuracy; no score in this app guarantees an exam result.
+
+Question exposure counts are kept in this browser and increment only when a question is opened. Clearing site storage or switching devices resets this rotation. Mock results explain every answer, including correct choices.
 
 Existing attempt records retain their stored 0–1000 accuracy value for compatibility, but the interface displays the equivalent percentage. For example, a stored value of 800 means 80% correct in this app, not a Microsoft exam score of 800.
 
