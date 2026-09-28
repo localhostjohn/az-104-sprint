@@ -22,7 +22,7 @@ Finish a QA course topic, take a focused sprint, then practise the configuration
 
 Question exposure counts are kept in this browser and increment only when a question is opened. Clearing site storage or switching devices resets this rotation. Mock results explain every answer, including correct choices.
 
-Objective-level tracking begins with attempts completed after this update; older attempts do not contain that breakdown. Objectives need at least three answered attempts before they are ranked, and repeated questions do not prove mastery. The public edition saves this in browser history; the private database-backed edition stores it in a separate objective-score table.
+Objective-level tracking begins with attempts completed after this update; older attempts do not contain that breakdown. Objectives need at least three answers across two distinct questions before they are ranked. Repeated questions still affect accuracy but do not increase breadth. The app stores per-question outcomes for new attempts; older attempts lack this detail. The public edition saves this in browser history; the private database-backed edition stores it in a separate objective-score table.
 
 Existing attempt records retain their stored 0–1000 accuracy value for compatibility, but the interface displays the equivalent percentage. For example, a stored value of 800 means 80% correct in this app, not a Microsoft exam score of 800.
 
