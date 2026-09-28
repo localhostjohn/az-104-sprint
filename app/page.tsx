@@ -12,7 +12,8 @@ type ReviewResult={question_id:number;correct:boolean};
 type LocalReviewRecord={question_id:number;miss_count:number;active:boolean;review_stage:number;next_review_at:string|null};
 type ReviewState={mistakes:Array<{question_id:number}>;schedule:ReviewSummary};
 const emptyReviewSummary:ReviewSummary={due_now:0,scheduled:0,mastered:0,next_review_at:null};
-const shuffle=<T,>(items:T[])=>[...items].sort(()=>Math.random()-.5);
+const shuffle=<T,>(items:T[])=>{const result=[...items];for(let i=result.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[result[i],result[j]]=[result[j],result[i]]}return result};
+const shuffleChoices=(question:Question):Question=>{const choices=shuffle(question.options.map((option,index)=>({option,index})));return {...question,options:choices.map(choice=>choice.option),answer:choices.findIndex(choice=>choice.index===question.answer)}};
 const fmtTime=(value:number)=>Math.floor(value/60)+':'+String(value%60).padStart(2,'0');
 const dateValue=(value:string)=>value.includes('T')?value:value.replace(' ','T')+'Z';
 const fmtDate=(value:string)=>new Date(dateValue(value)).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
@@ -152,7 +153,7 @@ export default function Home(){
     const source=questions.filter(item=>nextDomain===domains[0]||item.domain===nextDomain);
     const nextRound=nextMode==='mock'?createMockRound():nextMode==='review'?shuffle(mistakeQuestions).slice(0,10):shuffle(source).slice(0,10);
     if(!nextRound.length)return;
-    submittedRef.current=false;setMode(nextMode);setDomain(nextDomain);setRound(nextRound);setIndex(0);setPicked(null);setAnswers([]);setFlagged([]);setStreak(0);setSeconds(0);setScreen('quiz');
+    submittedRef.current=false;setMode(nextMode);setDomain(nextDomain);setRound(nextRound.map(shuffleChoices));setIndex(0);setPicked(null);setAnswers([]);setFlagged([]);setStreak(0);setSeconds(0);setScreen('quiz');
   };
   const applyReviewState=(state:ReviewState)=>{setMistakeIds((state.mistakes||[]).map(item=>item.question_id));setReviewSchedule(state.schedule??emptyReviewSummary)};
   const syncReviewResults=(results:ReviewResult[])=>{
