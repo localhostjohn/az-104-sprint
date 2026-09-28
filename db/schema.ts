@@ -42,6 +42,20 @@ export const attemptObjectiveScoresIndex = `
 CREATE INDEX IF NOT EXISTS idx_attempt_objective_scores_attempt_id
 ON attempt_objective_scores(attempt_id)`;
 
+export const attemptQuestionResultsSchema = `
+CREATE TABLE IF NOT EXISTS attempt_question_results (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  attempt_id INTEGER NOT NULL,
+  question_id INTEGER NOT NULL,
+  correct INTEGER NOT NULL CHECK(correct IN (0, 1)),
+  FOREIGN KEY(attempt_id) REFERENCES score_attempts(id) ON DELETE CASCADE,
+  UNIQUE(attempt_id, question_id)
+)`;
+
+export const attemptQuestionResultsIndex = `
+CREATE INDEX IF NOT EXISTS idx_attempt_question_results_attempt_id
+ON attempt_question_results(attempt_id)`;
+
 export const questionMistakesSchema = `
 CREATE TABLE IF NOT EXISTS question_mistakes (
   question_id INTEGER PRIMARY KEY,
