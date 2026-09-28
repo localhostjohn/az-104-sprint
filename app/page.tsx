@@ -142,8 +142,8 @@ export default function Home(){
   const submittedRef=useRef(false);
   const current=round[index];
 
-  useEffect(()=>{fetch('/api/scores').then(r=>r.ok?r.json():Promise.reject()).then(data=>{setHistory(data.attempts||[]);setHistoryStatus('ready')}).catch(()=>{try{setHistory(JSON.parse(localStorage.getItem('az104-history')||'[]'));setHistoryStatus('local')}catch{setHistoryStatus('error')}})},[]);
-  useEffect(()=>{fetch('/api/mistakes').then(r=>r.ok?r.json():Promise.reject()).then((data:ReviewState)=>{setMistakeIds((data.mistakes||[]).map(item=>item.question_id));setReviewSchedule(data.schedule??emptyReviewSummary);setMistakeStatus('ready')}).catch(()=>{try{const state=localReviewState(loadLocalReviewRecords());setMistakeIds(state.mistakes.map(item=>item.question_id));setReviewSchedule(state.schedule);setMistakeStatus('local')}catch{setMistakeStatus('error')}})},[]);
+  useEffect(()=>{fetch('/api/scores').then(r=>r.ok?r.json():Promise.reject()).then(data=>{const result=data as {attempts?:Attempt[]};setHistory(result.attempts||[]);setHistoryStatus('ready')}).catch(()=>{try{setHistory(JSON.parse(localStorage.getItem('az104-history')||'[]'));setHistoryStatus('local')}catch{setHistoryStatus('error')}})},[]);
+  useEffect(()=>{fetch('/api/mistakes').then(r=>r.ok?r.json():Promise.reject()).then(data=>{const result=data as ReviewState;setMistakeIds((result.mistakes||[]).map(item=>item.question_id));setReviewSchedule(result.schedule??emptyReviewSummary);setMistakeStatus('ready')}).catch(()=>{try{const state=localReviewState(loadLocalReviewRecords());setMistakeIds(state.mistakes.map(item=>item.question_id));setReviewSchedule(state.schedule);setMistakeStatus('local')}catch{setMistakeStatus('error')}})},[]);
   useEffect(()=>{if(screen!=='quiz'&&screen!=='examReview')return;const timer=setInterval(()=>setSeconds(v=>v+1),1000);return()=>clearInterval(timer)},[screen]);
   const viewedThisRound=useRef<Set<number>>(new Set());
   useEffect(()=>{if(screen==='quiz'&&current&&!viewedThisRound.current.has(current.id)){viewedThisRound.current.add(current.id);recordExposure(current.id)}},[screen,current]);
@@ -200,7 +200,7 @@ export default function Home(){
       return;
     }
     const body=results.length===1?results[0]:{answers:results};
-    void fetch('/api/mistakes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(response=>response.ok?response.json():Promise.reject()).then((state:ReviewState)=>applyReviewState(state)).catch(()=>{try{applyReviewState(applyLocalReviewResults(results));setMistakeStatus('local')}catch{setMistakeStatus('error')}});
+    void fetch('/api/mistakes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(response=>response.ok?response.json():Promise.reject()).then(state=>applyReviewState(state as ReviewState)).catch(()=>{try{applyReviewState(applyLocalReviewResults(results));setMistakeStatus('local')}catch{setMistakeStatus('error')}});
   };
   const trackMistake=(questionId:number,correct:boolean)=>syncReviewResults([{question_id:questionId,correct}]);
   const trackExamMistakes=(examAnswers:Answer[])=>syncReviewResults(examAnswers.map(answer=>({question_id:answer.q.id,correct:answer.ok})));
@@ -218,7 +218,7 @@ export default function Home(){
     const objective_breakdown=objectiveBreakdown(answerItems);
     const optimistic:Attempt={id:-Date.now(),score:finalScore,correct_answers:correct,total_questions:round.length,elapsed_seconds:seconds,mode:storedMode,domain:storedDomain,created_at:new Date().toISOString(),domain_breakdown,objective_breakdown};
     setHistory(items=>[optimistic,...items]);
-    try{const response=await fetch('/api/scores',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({score:finalScore,correct_answers:correct,total_questions:round.length,elapsed_seconds:seconds,mode:storedMode,domain:storedDomain,domain_breakdown,objective_breakdown})});if(!response.ok)throw new Error();const data=await response.json();setHistory(items=>items.map(item=>item.id===optimistic.id?data.attempt:item));setHistoryStatus('ready')}catch{setHistory(items=>{try{localStorage.setItem('az104-history',JSON.stringify(items));setHistoryStatus('local')}catch{setHistoryStatus('error')}return items})}
+    try{const response=await fetch('/api/scores',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({score:finalScore,correct_answers:correct,total_questions:round.length,elapsed_seconds:seconds,mode:storedMode,domain:storedDomain,domain_breakdown,objective_breakdown})});if(!response.ok)throw new Error();const data=await response.json() as {attempt:Attempt};setHistory(items=>items.map(item=>item.id===optimistic.id?data.attempt:item));setHistoryStatus('ready')}catch{setHistory(items=>{try{localStorage.setItem('az104-history',JSON.stringify(items));setHistoryStatus('local')}catch{setHistoryStatus('error')}return items})}
   };
   const goQuestion=(targetIndex:number)=>{const target=round[targetIndex];if(!target)return;setIndex(targetIndex);setPicked(answers.find(answer=>answer.q.id===target.id)?.pick??null);setScreen('quiz')};
   const toggleFlag=()=>setFlagged(items=>items.includes(current.id)?items.filter(id=>id!==current.id):[...items,current.id]);
