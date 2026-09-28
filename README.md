@@ -12,7 +12,7 @@ The application combines short teaching sessions, mock exams and score tracking 
 - 10-question teaching sprints with instant explanations, shuffled answer choices and least-seen question selection.
 - Weighted 50-question mock exams with a 100-minute target, favouring questions seen least often on this device.
 - Score history, average, personal best and a practice trend based on recent mocks.
-- A Study next screen that combines due reviews, the weakest domain, and a personal-lab task.
+- A Study next screen that combines due reviews, objective-level gaps, targeted drills, and a personal-lab task.
 - Practice results are shown as percentages, not estimates of Microsoft's scaled exam score.
 - Links from the weakest domain to the corresponding Microsoft Learn path.
 
@@ -21,6 +21,8 @@ The application combines short teaching sessions, mock exams and score tracking 
 Finish a QA course topic, take a focused sprint, then practise the configuration in a personal Azure lab. Review missed questions on schedule. Use the 50-question mocks to find weak domains, and validate your progress with unfamiliar questions and Microsoft's Practice Assessment before booking. Repeated questions in this small bank can inflate accuracy; no score in this app guarantees an exam result.
 
 Question exposure counts are kept in this browser and increment only when a question is opened. Clearing site storage or switching devices resets this rotation. Mock results explain every answer, including correct choices.
+
+Objective-level tracking begins with attempts completed after this update; older attempts do not contain that breakdown. Objectives need at least three answered attempts before they are ranked, and repeated questions do not prove mastery. The public edition saves this in browser history; the private database-backed edition stores it in a separate objective-score table.
 
 Existing attempt records retain their stored 0–1000 accuracy value for compatibility, but the interface displays the equivalent percentage. For example, a stored value of 800 means 80% correct in this app, not a Microsoft exam score of 800.
 
@@ -45,7 +47,7 @@ The public application does not require access to a live Azure tenant. Do not en
 
 My wider learning focuses on Azure administration, identity, networking, compute, storage, monitoring and security. This application supports that learning, but quiz results are not a substitute for practical experience. I use separate lab environments to practise configuration, troubleshooting and documenting technical decisions.
 
-Future improvements may include more scenario-based questions, clearer explanations of incorrect answers, and links from relevant questions to hands-on exercises. These are planned enhancements rather than completed features.
+Future improvements may include more original scenarios and topic-specific hands-on exercises. These are planned enhancements rather than completed features.
 
 ## Status and attribution
 
