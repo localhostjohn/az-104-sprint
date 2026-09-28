@@ -12,6 +12,7 @@ The application combines short teaching sessions, mock exams and score tracking 
 - 10-question teaching sprints with instant explanations and shuffled answer choices.
 - Weighted 50-question mock exams with a 100-minute target.
 - Score history, average, personal best and a practice trend based on recent mocks.
+- A Study next screen that combines due reviews, the weakest domain, and a personal-lab task.
 - Practice results are shown as percentages, not estimates of Microsoft's scaled exam score.
 - Links from the weakest domain to the corresponding Microsoft Learn path.
 
