@@ -2,7 +2,7 @@
 import {useEffect,useMemo,useRef,useState} from 'react';
 import {domains,Question,questions} from './questions';
 
-type Screen='home'|'quiz'|'examReview'|'result'|'progress'|'resources';
+type Screen='home'|'quiz'|'examReview'|'result'|'progress'|'resources'|'plan';
 type Mode='sprint'|'mock'|'review';
 type Answer={q:Question;pick:number;ok:boolean};
 type DomainResult={correct:number;total:number};
@@ -89,6 +89,13 @@ const learningPaths=[
   {step:'04',domain:'Networking · 15–20%',title:'Configure and manage virtual networks',focus:'VNets, routing, DNS, load balancing and connectivity',href:'https://learn.microsoft.com/en-us/training/paths/az-104-manage-virtual-networks/'},
   {step:'05',domain:'Monitoring & recovery · 10–15%',title:'Monitor and back up Azure resources',focus:'Azure Monitor, alerts, Backup and recovery',href:'https://learn.microsoft.com/en-us/training/paths/az-104-monitor-backup-resources/'},
 ];
+const labTasks:Record<string,{title:string;steps:string[]}>={
+  'Identity & governance':{title:'Check governance on a lab resource group',steps:['Create or choose a personal lab resource group.','Apply a CanNotDelete lock, inspect its effect, then remove it.','Write down how an Azure Policy assignment differs from a lock.']},
+  'Storage':{title:'Recover a deleted lab blob',steps:['Use a personal storage account and enable blob soft delete.','Upload a harmless test file, delete it, then restore it.','Check the separate container soft-delete setting and clean up the test file.']},
+  'Compute':{title:'Preview a Bicep deployment',steps:['Open a small Bicep file from your personal lab.','Run a resource-group what-if and identify any creates, changes, or deletes.','Explain each proposed change before deploying anything.']},
+  'Networking':{title:'Trace access through your lab network',steps:['Choose a personal VNet and inspect its subnets and associated NSGs.','Predict which NSG rule would match a test flow, then verify the effective rule where a VM NIC is available.','Record the rule priority and any route or DNS dependency.']},
+  'Monitoring & recovery':{title:'Trace a lab change in Activity Log',steps:['Choose a resource you changed in your personal subscription.','Find the operation, caller, time, and result in Azure Activity Log.','Describe which signal would alert you and how you would recover the resource.']},
+};
 const examResources=[
   {tag:'BLUEPRINT',title:'Official AZ-104 study guide',copy:'Use the current skills-measured list as your master checklist.',href:'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/az-104'},
   {tag:'PRACTICE',title:'Microsoft Practice Assessment',copy:'Take Microsoft’s free assessment after completing the learning paths.',href:'https://learn.microsoft.com/en-us/credentials/certifications/azure-administrator/?practice-assessment-type=certification'},
@@ -148,6 +155,10 @@ export default function Home(){
   const weak=useMemo(()=>Object.entries(answers.reduce<Record<string,{right:number;total:number}>>((acc,item)=>{acc[item.q.domain]??={right:0,total:0};acc[item.q.domain].total++;if(item.ok)acc[item.q.domain].right++;return acc},{})).sort((a,b)=>a[1].right/a[1].total-b[1].right/b[1].total)[0]?.[0],[answers]);
   const weakLearningPath=learningPaths.find(path=>path.domain.startsWith(weak??'___'));
   const mistakeQuestions=useMemo(()=>mistakeIds.map(id=>questions.find(question=>question.id===id)).filter((question):question is Question=>Boolean(question)),[mistakeIds]);
+  const dueObjectives=useMemo(()=>Object.entries(mistakeQuestions.reduce<Record<string,number>>((counts,question)=>{const key=question.domain+' · '+question.objective;counts[key]=(counts[key]??0)+1;return counts},{})).sort((a,b)=>b[1]-a[1]).slice(0,3),[mistakeQuestions]);
+  const focusDomain=weakestDomain?.name??'Identity & governance';
+  const focusPath=learningPaths.find(path=>path.domain.startsWith(focusDomain));
+  const labTask=labTasks[focusDomain];
 
   const start=(nextMode:Mode=mode,nextDomain:string=domain)=>{
     const source=questions.filter(item=>nextDomain===domains[0]||item.domain===nextDomain);
@@ -200,7 +211,7 @@ export default function Home(){
   useEffect(()=>{if(mode==='mock'&&(screen==='quiz'||screen==='examReview')&&seconds>=6000)finishExam()},[mode,screen,seconds]);
 
   return <main>
-    <header className="top"><button className="logo" onClick={goHome}><span>AZ</span><strong>104 SPRINT</strong></button><nav className="nav"><button className={screen==='home'?'active':''} onClick={goHome}>Practice</button><button className={screen==='progress'?'active':''} onClick={()=>setScreen('progress')}>Progress <b>{history.length}</b></button><button className={screen==='resources'?'active':''} onClick={()=>setScreen('resources')}>Learn</button></nav></header>
+    <header className="top"><button className="logo" onClick={goHome}><span>AZ</span><strong>104 SPRINT</strong></button><nav className="nav"><button className={screen==='home'?'active':''} onClick={goHome}>Practice</button><button className={screen==='plan'?'active':''} onClick={()=>setScreen('plan')}>Study next</button><button className={screen==='progress'?'active':''} onClick={()=>setScreen('progress')}>Progress <b>{history.length}</b></button><button className={screen==='resources'?'active':''} onClick={()=>setScreen('resources')}>Learn</button></nav></header>
 
     {screen==='home'&&<section className="home">
       <div className="hero"><p className="kicker">AZURE ADMINISTRATOR // COMPLETE BLUEPRINT</p><h1>Practise with purpose.<br/><em>Close the gaps.</em></h1><p className="lede">{questions.length} original questions across every objective in Microsoft’s current AZ-104 outline—from Entra and storage to compute, networking, monitoring, backup, and recovery.</p><div className="target"><b>80%<small>PRACTICE GOAL</small></b><span><strong>A guide to your revision</strong><p>This app reports accuracy on its own questions. It does not predict Microsoft’s scaled exam score.</p></span></div></div>
@@ -212,6 +223,15 @@ export default function Home(){
         <button className="primary" disabled={mistakeStatus==='loading'} onClick={()=>start()}>{mistakeStatus==='loading'?'Loading review history…':mode==='mock'?'Start exam simulator':mode==='review'?`Review ${Math.min(10,mistakeIds.length)} mistake${Math.min(10,mistakeIds.length)===1?'':'s'}`:'Start 10-question sprint'} <span>→</span></button><small className="fine">{historyStatus==='local'||mistakeStatus==='local'?'Your scores and missed questions stay in this browser on this device.':'Your scores and missed questions are saved privately to this site.'}</small>
       </div>
       <div className="blueprint"><p>2026 EXAM BLUEPRINT</p>{[['Identity & governance','20–25%'],['Compute','20–25%'],['Storage','15–20%'],['Networking','15–20%'],['Monitoring & recovery','10–15%']].map(item=><div key={item[0]}><span>{item[0]}</span><i/><b>{item[1]}</b></div>)}</div>
+    </section>}
+
+    {screen==='plan'&&<section className="study-plan">
+      <p className="kicker">YOUR NEXT STUDY SESSION</p><h1>One clear next step.</h1><p className="plan-intro">Use this plan with your QA Cloud Academy course. It responds to practice saved in this browser or your private app history; it does not estimate your exam score.</p>
+      <div className="plan-grid">
+        <article><span>01 · RETRIEVE</span><h2>{mistakeIds.length?`Review ${mistakeIds.length} due question${mistakeIds.length===1?'':'s'}`:'Start with a baseline'}</h2><p>{mistakeIds.length?'Answer from memory, then explain why the other options are wrong.':reviewSchedule.scheduled?`${reviewSchedule.scheduled} review${reviewSchedule.scheduled===1?' is':'s are'} scheduled for later. Take a mixed sprint today.`:'Take a mixed 10-question sprint to find your first gap.'}</p>{dueObjectives.length>0&&<ul>{dueObjectives.map(([objective,count])=><li key={objective}>{objective} <small>×{count}</small></li>)}</ul>}<button onClick={()=>start(mistakeIds.length?'review':'sprint','All domains')}>{mistakeIds.length?'Review due →':'Start mixed sprint →'}</button></article>
+        <article><span>02 · TARGET</span><h2>{weakestDomain?focusDomain:'Find your weakest domain'}</h2><p>{weakestDomain?`${weakestDomain.correct}/${weakestDomain.total} correct (${weakestDomain.percent}%) across your saved attempts. Drill it after the due reviews.`:'Complete a sprint to unlock a domain recommendation. You can still study the current QA course topic now.'}</p>{focusPath&&<a href={focusPath.href} target="_blank" rel="noreferrer">Open Microsoft Learn path ↗</a>}<button onClick={()=>start('sprint',weakestDomain?focusDomain:'All domains')}>{weakestDomain?'Drill this domain →':'Take a baseline →'}</button></article>
+        <article><span>03 · APPLY</span><h2>{labTask.title}</h2><ol>{labTask.steps.map(step=><li key={step}>{step}</li>)}</ol><p>Use your personal Azure lab, check costs before creating resources, and clean up temporary resources.</p></article>
+      </div><div className="plan-footer"><strong>Then validate</strong><p>After repairing a gap, take a mixed mock with no notes. Use Microsoft’s Practice Assessment for an independent check before booking.</p><button onClick={()=>start('mock','All domains')}>Start a 50-question mock →</button></div>
     </section>}
 
     {screen==='progress'&&<section className="progress-page">
