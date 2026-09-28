@@ -6,7 +6,7 @@ type Screen='home'|'quiz'|'examReview'|'result'|'progress'|'resources'|'plan';
 type Mode='sprint'|'mock'|'review';
 type Answer={q:Question;pick:number;ok:boolean};
 type DomainResult={correct:number;total:number};
-type Attempt={id:number;score:number;correct_answers:number;total_questions:number;elapsed_seconds:number;mode:'sprint'|'mock';domain:string;created_at:string;domain_breakdown?:Record<string,DomainResult>;objective_breakdown?:Record<string,DomainResult>};
+type Attempt={id:number;score:number;correct_answers:number;total_questions:number;elapsed_seconds:number;mode:'sprint'|'mock';domain:string;created_at:string;domain_breakdown?:Record<string,DomainResult>;objective_breakdown?:Record<string,DomainResult>;question_results?:Array<{question_id:number;correct:boolean}>};
 type ReviewSummary={due_now:number;scheduled:number;mastered:number;next_review_at:string|null};
 type ReviewResult={question_id:number;correct:boolean};
 type LocalReviewRecord={question_id:number;miss_count:number;active:boolean;review_stage:number;next_review_at:string|null};
@@ -86,11 +86,20 @@ const objectiveBreakdown=(items:Answer[])=>items.reduce<Record<string,DomainResu
 },{});
 const aggregateObjectives=(attempts:Attempt[])=>{
   const totals:Record<string,DomainResult>={};
-  for(const attempt of attempts)for(const [key,value] of Object.entries(attempt.objective_breakdown??{})){
+  const distinct=new Map<string,Set<number>>();
+  for(const attempt of attempts){
+    for(const result of attempt.question_results??[]){
+      const question=questions.find(item=>item.id===result.question_id);
+      if(!question)continue;
+      const key=objectiveKey(question),ids=distinct.get(key)??new Set<number>();
+      ids.add(question.id);distinct.set(key,ids);
+    }
+    for(const [key,value] of Object.entries(attempt.objective_breakdown??{})){
     totals[key]??={correct:0,total:0};
     totals[key].correct+=value.correct;totals[key].total+=value.total;
+    }
   }
-  return Object.entries(totals).map(([key,value])=>({key,domain:key.split(' · ')[0],objective:key.split(' · ').slice(1).join(' · '),...value,percent:Math.round(value.correct/value.total*100)}));
+  return Object.entries(totals).map(([key,value])=>({key,domain:key.split(' · ')[0],objective:key.split(' · ').slice(1).join(' · '),...value,distinct:distinct.get(key)?.size??0,percent:Math.round(value.correct/value.total*100)}));
 };
 const aggregateDomains=(attempts:Attempt[])=>domains.slice(1).map(name=>{
   const totals=attempts.reduce<DomainResult>((result,attempt)=>{
@@ -154,8 +163,8 @@ export default function Home(){
   const targetHits=history.filter(x=>x.score>=800).length;
   const domainStats=useMemo(()=>aggregateDomains(history),[history]);
   const objectiveStats=useMemo(()=>aggregateObjectives(history),[history]);
-  const rankedObjectives=useMemo(()=>objectiveStats.filter(item=>item.total>=3).sort((a,b)=>a.percent-b.percent||b.total-a.total).slice(0,3),[objectiveStats]);
-  const lowEvidence=useMemo(()=>objectiveStats.filter(item=>item.total<3).length,[objectiveStats]);
+  const rankedObjectives=useMemo(()=>objectiveStats.filter(item=>item.total>=3&&item.distinct>=2).sort((a,b)=>a.percent-b.percent||b.total-a.total).slice(0,3),[objectiveStats]);
+  const lowEvidence=useMemo(()=>objectiveStats.filter(item=>item.total<3||item.distinct<2).length,[objectiveStats]);
   const focusObjective=rankedObjectives[0];
   const recentExams=useMemo(()=>history.filter(attempt=>attempt.mode==='mock').slice(0,3),[history]);
   const recentExamAverage=recentExams.length?Math.round(recentExams.reduce((sum,attempt)=>sum+attempt.score,0)/recentExams.length):0;
@@ -216,9 +225,10 @@ export default function Home(){
     const storedDomain=mode==='mock'?'All domains':mode==='review'?'Review mistakes':domain;
     const domain_breakdown=answerBreakdown(answerItems);
     const objective_breakdown=objectiveBreakdown(answerItems);
-    const optimistic:Attempt={id:-Date.now(),score:finalScore,correct_answers:correct,total_questions:round.length,elapsed_seconds:seconds,mode:storedMode,domain:storedDomain,created_at:new Date().toISOString(),domain_breakdown,objective_breakdown};
+    const question_results=answerItems.map(answer=>({question_id:answer.q.id,correct:answer.ok}));
+    const optimistic:Attempt={id:-Date.now(),score:finalScore,correct_answers:correct,total_questions:round.length,elapsed_seconds:seconds,mode:storedMode,domain:storedDomain,created_at:new Date().toISOString(),domain_breakdown,objective_breakdown,question_results};
     setHistory(items=>[optimistic,...items]);
-    try{const response=await fetch('/api/scores',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({score:finalScore,correct_answers:correct,total_questions:round.length,elapsed_seconds:seconds,mode:storedMode,domain:storedDomain,domain_breakdown,objective_breakdown})});if(!response.ok)throw new Error();const data=await response.json() as {attempt:Attempt};setHistory(items=>items.map(item=>item.id===optimistic.id?data.attempt:item));setHistoryStatus('ready')}catch{setHistory(items=>{try{localStorage.setItem('az104-history',JSON.stringify(items));setHistoryStatus('local')}catch{setHistoryStatus('error')}return items})}
+    try{const response=await fetch('/api/scores',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({score:finalScore,correct_answers:correct,total_questions:round.length,elapsed_seconds:seconds,mode:storedMode,domain:storedDomain,domain_breakdown,objective_breakdown,question_results})});if(!response.ok)throw new Error();const data=await response.json() as {attempt:Attempt};setHistory(items=>items.map(item=>item.id===optimistic.id?data.attempt:item));setHistoryStatus('ready')}catch{setHistory(items=>{try{localStorage.setItem('az104-history',JSON.stringify(items));setHistoryStatus('local')}catch{setHistoryStatus('error')}return items})}
   };
   const goQuestion=(targetIndex:number)=>{const target=round[targetIndex];if(!target)return;setIndex(targetIndex);setPicked(answers.find(answer=>answer.q.id===target.id)?.pick??null);setScreen('quiz')};
   const toggleFlag=()=>setFlagged(items=>items.includes(current.id)?items.filter(id=>id!==current.id):[...items,current.id]);
@@ -256,7 +266,7 @@ export default function Home(){
       <p className="kicker">YOUR NEXT STUDY SESSION</p><h1>One clear next step.</h1><p className="plan-intro">Use this plan with your QA Cloud Academy course. It responds to practice saved in this browser or your private app history; it does not estimate your exam score.</p>
       <div className="plan-grid">
         <article><span>01 · RETRIEVE</span><h2>{mistakeIds.length?`Review ${mistakeIds.length} due question${mistakeIds.length===1?'':'s'}`:'Start with a baseline'}</h2><p>{mistakeIds.length?'Answer from memory, then explain why the other options are wrong.':reviewSchedule.scheduled?`${reviewSchedule.scheduled} review${reviewSchedule.scheduled===1?' is':'s are'} scheduled for later. Take a mixed sprint today.`:'Take a mixed 10-question sprint to find your first gap.'}</p>{dueObjectives.length>0&&<ul>{dueObjectives.map(([objective,count])=><li key={objective}>{objective} <small>×{count}</small></li>)}</ul>}<button onClick={()=>start(mistakeIds.length?'review':'sprint','All domains')}>{mistakeIds.length?'Review due →':'Start mixed sprint →'}</button></article>
-        <article><span>02 · TARGET</span><h2>{focusObjective?focusObjective.objective:weakestDomain?focusDomain:'Find your first gap'}</h2><p>{focusObjective?`${focusObjective.domain} · ${focusObjective.correct}/${focusObjective.total} correct (${focusObjective.percent}%) across attempts. Treat repeated questions as practice, not proof of mastery.`:weakestDomain?`Your lowest domain is ${focusDomain}, but no objective has three answers recorded yet. Gather more evidence with a domain sprint.`:'Complete a sprint to unlock a recommendation. You can still study the current QA course topic now.'}</p>{focusPath&&<a href={focusPath.href} target="_blank" rel="noreferrer">Open Microsoft Learn path ↗</a>}<button onClick={()=>start('sprint',focusObjective?.domain??weakestDomain?.name??'All domains',focusObjective?.objective)}>{focusObjective?'Drill this objective →':weakestDomain?'Drill this domain →':'Take a baseline →'}</button></article>
+        <article><span>02 · TARGET</span><h2>{focusObjective?focusObjective.objective:weakestDomain?focusDomain:'Find your first gap'}</h2><p>{focusObjective?`${focusObjective.domain} · ${focusObjective.correct}/${focusObjective.total} correct (${focusObjective.percent}%) across attempts on ${focusObjective.distinct} different questions. Treat repeats as practice, not proof of mastery.`:weakestDomain?`Your lowest domain is ${focusDomain}, but no objective has three answers recorded yet. Gather more evidence with a domain sprint.`:'Complete a sprint to unlock a recommendation. You can still study the current QA course topic now.'}</p>{focusPath&&<a href={focusPath.href} target="_blank" rel="noreferrer">Open Microsoft Learn path ↗</a>}<button onClick={()=>start('sprint',focusObjective?.domain??weakestDomain?.name??'All domains',focusObjective?.objective)}>{focusObjective?'Drill this objective →':weakestDomain?'Drill this domain →':'Take a baseline →'}</button></article>
         <article><span>03 · APPLY</span><h2>{labTask.title}</h2>{focusObjective&&<p>Connect this lab to <strong>{focusObjective.objective}</strong>: explain how you would configure or verify that specific skill.</p>}<ol>{labTask.steps.map(step=><li key={step}>{step}</li>)}</ol><p>Use your personal Azure lab, check costs before creating resources, and clean up temporary resources.</p></article>
       </div><div className="plan-footer"><strong>Then validate</strong><p>After repairing a gap, take a mixed mock with no notes. Use Microsoft’s Practice Assessment for an independent check before booking.</p><button onClick={()=>start('mock','All domains')}>Start a 50-question mock →</button></div>
     </section>}
@@ -270,9 +280,9 @@ export default function Home(){
       <article className="domain-card"><div className="panel-title"><div><h2>Performance by exam domain</h2><p>All completed attempts with domain data · weighted by questions answered</p></div>{weakestDomain&&<span className="domain-focus">FOCUS: {weakestDomain.name.toUpperCase()}</span>}</div>
         {domainStats.some(item=>item.total)?<div className="domain-list">{domainStats.map(item=><div className="domain-row" key={item.name}><div><strong>{item.name}</strong><small>{item.total?`${item.correct}/${item.total} correct · ${item.total} questions seen`:'No questions recorded yet'}</small></div><div className="domain-meter"><i style={{width:item.percent+'%'}} className={item.percent>=80?'strong':item.percent>=70?'steady':'focus'}/></div><b className={item.percent>=80?'strong-text':item.percent>=70?'steady-text':'focus-text'}>{item.total?item.percent+'%':'—'}</b><button onClick={()=>start('sprint',item.name)}>Drill</button></div>)}</div>:<div className="domain-empty"><strong>Complete one new sprint or exam to unlock domain analytics.</strong><span>Earlier attempts remain in your history; new attempts add the detailed breakdown.</span></div>}
       </article>
-      <article className="objective-card"><div className="panel-title"><div><h2>Objective-level gaps</h2><p>Ranked after at least three answers per objective. Repeated questions can raise the score without proving mastery.</p></div></div>
-        {rankedObjectives.length?<div className="objective-list">{rankedObjectives.map(item=><div className="objective-row" key={item.key}><div><strong>{item.objective}</strong><small>{item.domain} · {item.correct}/{item.total} correct across attempts</small></div><b>{item.percent}%</b><button onClick={()=>start('sprint',item.domain,item.objective)}>Drill {questions.filter(q=>q.domain===item.domain&&q.objective===item.objective).length} question{questions.filter(q=>q.domain===item.domain&&q.objective===item.objective).length===1?'':'s'} →</button></div>)}</div>:<p className="objective-empty">Complete more practice to identify objective-level gaps. A topic needs at least three answered attempts before it is ranked.</p>}
-        {lowEvidence>0&&<p className="objective-evidence">{lowEvidence} practised objective{lowEvidence===1?' has':'s have'} fewer than three answers and {lowEvidence===1?'is':'are'} not ranked yet.</p>}
+      <article className="objective-card"><div className="panel-title"><div><h2>Objective-level gaps</h2><p>Ranked after at least three answers across two different questions. Repeats count toward accuracy, but not breadth.</p></div></div>
+        {rankedObjectives.length?<div className="objective-list">{rankedObjectives.map(item=><div className="objective-row" key={item.key}><div><strong>{item.objective}</strong><small>{item.domain} · {item.correct}/{item.total} correct · {item.distinct} distinct questions</small></div><b>{item.percent}%</b><button onClick={()=>start('sprint',item.domain,item.objective)}>Drill {questions.filter(q=>q.domain===item.domain&&q.objective===item.objective).length} question{questions.filter(q=>q.domain===item.domain&&q.objective===item.objective).length===1?'':'s'} →</button></div>)}</div>:<p className="objective-empty">Complete more practice to identify objective-level gaps. A topic needs three answers across two different questions before it is ranked.</p>}
+        {lowEvidence>0&&<p className="objective-evidence">{lowEvidence} practised objective{lowEvidence===1?' needs':'s need'} more answers or different questions before ranking. Some topics have only one question in this bank.</p>}
       </article>
       <article className="history-card"><div className="panel-title"><div><h2>Attempt history</h2><p>Newest first · up to 100 attempts</p></div>{historyStatus==='local'&&<span className="local-note">SAVED ON THIS DEVICE</span>}{historyStatus==='error'&&<span className="sync-error">Sync needs a retry</span>}</div>{history.length?<div className="history-table"><div className="history-row labels"><span>Date</span><span>Mode</span><span>Focus</span><span>Accuracy</span><span>Time</span><span>Practice</span></div>{history.map(item=><div className="history-row" key={item.id}><span>{fmtDate(item.created_at)}</span><span><b className="mode-pill">{item.mode==='mock'?'Exam 50':item.domain==='Review mistakes'?'Review':'Sprint'}</b></span><span>{item.domain}</span><span>{item.correct_answers}/{item.total_questions}</span><span>{fmtTime(item.elapsed_seconds)}</span><strong className={item.score>=800?'pass-text':''}>{practicePercent(item.score)}%</strong></div>)}</div>:<div className="loading">{historyStatus==='loading'?'Loading your scores…':'No completed attempts yet.'}</div>}</article>
     </section>}
