@@ -8,8 +8,8 @@ The application combines short teaching sessions, mock exams and score tracking 
 
 ## Features
 
-- 80 original questions covering the objectives in the April 2026 AZ-104 skills outline.
-- 10-question teaching sprints with instant explanations.
+- 109 original questions, including 20 new scenario questions, across the April 2026 AZ-104 skills outline.
+- 10-question teaching sprints with instant explanations and shuffled answer choices.
 - Weighted 50-question mock exams with a 100-minute target.
 - Score history, average, personal best and a practice trend based on recent mocks.
 - Practice results are shown as percentages, not estimates of Microsoft's scaled exam score.
