@@ -1,5 +1,5 @@
 import {env} from 'cloudflare:workers';
-import {attemptDomainScoresIndex,attemptDomainScoresSchema,attemptObjectiveScoresIndex,attemptObjectiveScoresSchema,scoreHistoryIndex,scoreHistorySchema} from '@/db/schema';
+import {attemptDomainScoresIndex,attemptDomainScoresSchema,attemptObjectiveScoresIndex,attemptObjectiveScoresSchema,attemptQuestionResultsIndex,attemptQuestionResultsSchema,scoreHistoryIndex,scoreHistorySchema} from '@/db/schema';
 
 export type DomainResult={correct:number;total:number};
 
@@ -8,6 +8,7 @@ export type ScoreAttempt = {
   elapsed_seconds:number; mode:'sprint'|'mock'; domain:string; created_at:string;
   domain_breakdown?:Record<string,DomainResult>;
   objective_breakdown?:Record<string,DomainResult>;
+  question_results?:Array<{question_id:number;correct:boolean}>;
 };
 
 type ScoreInput=Omit<ScoreAttempt,'id'|'created_at'>;
@@ -23,6 +24,8 @@ export async function ensureScoresTable(){
     db.prepare(attemptDomainScoresIndex),
     db.prepare(attemptObjectiveScoresSchema),
     db.prepare(attemptObjectiveScoresIndex),
+    db.prepare(attemptQuestionResultsSchema),
+    db.prepare(attemptQuestionResultsIndex),
   ]);
   return db;
 }
@@ -56,7 +59,19 @@ export async function listScores(){
     breakdown[row.objective_key]={correct:row.correct_answers,total:row.total_questions};
     objectives.set(row.attempt_id,breakdown);
   }
-  return result.results.map(attempt=>({...attempt,domain_breakdown:breakdowns.get(attempt.id),objective_breakdown:objectives.get(attempt.id)}));
+  const questionRows=await db.prepare(
+    `SELECT detail.attempt_id, detail.question_id, detail.correct
+     FROM attempt_question_results detail
+     JOIN (SELECT id FROM score_attempts ORDER BY created_at DESC, id DESC LIMIT 100) recent
+       ON recent.id = detail.attempt_id`
+  ).all<{attempt_id:number;question_id:number;correct:number}>();
+  const results=new Map<number,Array<{question_id:number;correct:boolean}>>();
+  for(const row of questionRows.results){
+    const entries=results.get(row.attempt_id)??[];
+    entries.push({question_id:row.question_id,correct:Boolean(row.correct)});
+    results.set(row.attempt_id,entries);
+  }
+  return result.results.map(attempt=>({...attempt,domain_breakdown:breakdowns.get(attempt.id),objective_breakdown:objectives.get(attempt.id),question_results:results.get(attempt.id)}));
 }
 
 export async function saveScore(input:ScoreInput){
@@ -77,5 +92,10 @@ export async function saveScore(input:ScoreInput){
       'INSERT INTO attempt_objective_scores (attempt_id, objective_key, correct_answers, total_questions) VALUES (?, ?, ?, ?)'
     ).bind(result.id,key,value.correct,value.total)));
   }
-  return {...result,domain_breakdown:input.domain_breakdown,objective_breakdown:input.objective_breakdown};
+  if(input.question_results?.length){
+    await db.batch(input.question_results.map(item=>db.prepare(
+      'INSERT INTO attempt_question_results (attempt_id, question_id, correct) VALUES (?, ?, ?)'
+    ).bind(result.id,item.question_id,item.correct?1:0)));
+  }
+  return {...result,domain_breakdown:input.domain_breakdown,objective_breakdown:input.objective_breakdown,question_results:input.question_results};
 }
